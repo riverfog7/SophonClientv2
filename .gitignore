@@ -189,3 +189,6 @@ Temporary Items
 
 .idea/
 .vscode/
+
+# ignore protobuff generated files
+*.pb.go
