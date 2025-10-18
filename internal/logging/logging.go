@@ -98,6 +98,14 @@ func (l *Logger) Fatal(message string) {
 		l.HandleMessage(fatalColored)
 	}
 
+	err := l.LogFile.Sync()
+	if err != nil {
+		panic(err)
+	}
+	err = l.LogFile.Close()
+	if err != nil {
+		panic(err)
+	}
 	os.Exit(1) // Exit in fatal errors
 }
 
