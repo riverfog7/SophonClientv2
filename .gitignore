@@ -192,3 +192,5 @@ Temporary Items
 
 # ignore protobuff generated files
 *.pb.go
+
+internal/secrets/secrets.go
