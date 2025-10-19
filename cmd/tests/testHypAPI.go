@@ -2,6 +2,7 @@ package main
 
 import (
 	"SophonClientv2/pkg/hypAPI"
+	"SophonClientv2/pkg/manifest"
 	"fmt"
 )
 
@@ -35,5 +36,15 @@ func main() {
 		if sophon.Retcode != 0 {
 			fmt.Printf("Error fetching Sophon build for %s: %s\n", mainBranch.Branch, sophon.Message)
 		}
+	}
+
+	// test manifest fetch
+	branch := hypAPI.OSGameBranches.Data.GameBranches[0].Main
+	sophonBuild := hypAPI.GetSophonBuildByBranch("os", branch)
+	if sophonBuild.Retcode != 0 {
+		fmt.Printf("Error fetching Sophon build for %s: %s\n", branch.Branch, sophonBuild.Message)
+	} else {
+		man := manifest.GetManifest(sophonBuild.Data.Manifests[0])
+		StructPrettyPrint(man)
 	}
 }
