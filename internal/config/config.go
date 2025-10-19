@@ -19,6 +19,10 @@ type SophonClientConfig struct {
 	MaxManifestDownloadRetries int
 	MaxChunkDownloadRetries    int
 
+	DownloadChanSize   int
+	VerifyChanSize     int
+	DecompressChanSize int
+
 	CocurrentDownloads      int
 	CocurrentDecompressions int
 	CocurrentHashchecks     int
@@ -32,6 +36,10 @@ func NewSophonClientConfig() SophonClientConfig {
 	cfg := SophonClientConfig{
 		MaxManifestDownloadRetries: 5,
 		MaxChunkDownloadRetries:    5,
+
+		DownloadChanSize:   32,
+		VerifyChanSize:     32,
+		DecompressChanSize: 32,
 
 		CocurrentDownloads:      16,
 		CocurrentDecompressions: 4,
