@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-func GetManifest(gameType string, relType string, matchingField string, branch string) *models.Manifest {
+func GetManifest(gameType string, relType string, matchingField string, branch string) (*models.Manifest, *models.SophonManifest) {
 	var biz string
 	var hypGames []models.HYPGame
 	switch strings.ToLower(relType) {
@@ -56,10 +56,10 @@ func GetManifest(gameType string, relType string, matchingField string, branch s
 			if mani == nil {
 				logging.GlobalLogger.Fatal("Failed to fetch manifest for matching field: " + matchingField)
 			}
-			return mani
+			return mani, &manifestInfo
 		}
 	}
 
 	logging.GlobalLogger.Fatal("Failed to find matching manifest with field: " + matchingField)
-	return nil
+	return nil, nil
 }
