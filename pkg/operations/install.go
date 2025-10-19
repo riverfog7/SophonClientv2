@@ -9,15 +9,14 @@ package operations
 // 6. If any step fails, retry up to N times before failing the entire install
 
 import (
-	"SophonClientv2/internal/logging"
-	"SophonClientv2/internal/models"
-	"crypto/md5"
-	"encoding/hex"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"sync"
+
+	"SophonClientv2/internal/logging"
+	"SophonClientv2/internal/models"
+	"SophonClientv2/pkg/verifier"
 )
 
 type ChunkDestination struct {
@@ -164,6 +163,9 @@ func (inst *Installer) Prepare() error {
 		return fmt.Errorf("creating staging dir: %w", err)
 	}
 
+	// Set up verifier and enqueue existing files
+	ver := verifier.NewVerifier(len(inst.FileMap) * 2)
+	jobs := 0
 	for filePath, fm := range inst.FileMap {
 		absPath := filepath.Join(inst.GameDir, filePath)
 		info, err := os.Stat(absPath)
@@ -180,54 +182,50 @@ func (inst *Installer) Prepare() error {
 			continue
 		}
 
-		// MD5 hashcheck
+		// MD5 hashcheck (submits to verifier)
 		f, err := os.Open(absPath)
 		if err != nil {
 			logging.GlobalLogger.Fatal(fmt.Sprintf("Error opening existing file %s: %v", absPath, err))
 			return fmt.Errorf("opening existing file %s: %w", absPath, err)
 		}
+		ver.EnqueueVerification(f.Name(), f, fm.MD5, fm)
+		jobs++
+	}
 
-		hash := md5.New()
-		if _, err := io.Copy(hash, f); err != nil {
-			_ = f.Close()
-			logging.GlobalLogger.Fatal(fmt.Sprintf("Error hashing file %s: %v", absPath, err))
-			return fmt.Errorf("hashing existing file %s: %w", absPath, err)
-		}
-		_ = f.Close()
+	// Collect verifier results
+	for i := 0; i < jobs; i++ {
+		out := <-ver.GetOutputChannel()
+		fmOut := out.Payload.(*FileMetaData)
+		absPath := filepath.Join(inst.GameDir, fmOut.FilePath)
 
-		sum := hex.EncodeToString(hash.Sum(nil))
-		if sum != fm.MD5 {
-			logging.GlobalLogger.Warn(fmt.Sprintf("File failed verification, deleting: %s", absPath))
-			if err := os.Remove(absPath); err != nil {
-				logging.GlobalLogger.Error(fmt.Sprintf("Error removing invalid file %s: %v", absPath, err))
-				return fmt.Errorf("removing invalid file %s: %w", absPath, err)
-			}
-			continue
-		}
-		logging.GlobalLogger.Info(fmt.Sprintf("Existing file verified, skipping download: %s", absPath))
+		if out.Suceeded {
+			logging.GlobalLogger.Info(fmt.Sprintf("Existing file verified, skipping download: %s", absPath))
 
-		// remove chunks (non duplicates) and file if file is valid
-		for _, chunkID := range fm.Chunks {
-			cm, ok := inst.ChunkMap[chunkID]
-			if !ok {
-				continue
-			}
-
-			newDests := make([]ChunkDestination, 0, len(cm.Destinations))
-			for _, dest := range cm.Destinations {
-				if dest.File != fm {
-					newDests = append(newDests, dest)
+			for _, chunkID := range fmOut.Chunks {
+				if cm, ok := inst.ChunkMap[chunkID]; ok {
+					newD := make([]ChunkDestination, 0, len(cm.Destinations))
+					for _, dest := range cm.Destinations {
+						if dest.File != fmOut {
+							newD = append(newD, dest)
+						}
+					}
+					if len(newD) == 0 {
+						delete(inst.ChunkMap, chunkID)
+					} else {
+						cm.Destinations = newD
+					}
 				}
 			}
-
-			if len(newDests) == 0 {
-				delete(inst.ChunkMap, chunkID)
-			} else {
-				cm.Destinations = newDests
+			delete(inst.FileMap, fmOut.FilePath)
+		} else {
+			logging.GlobalLogger.Warn(fmt.Sprintf("File failed verification, deleting: %s", absPath))
+			if err := os.Remove(absPath); err != nil {
+				logging.GlobalLogger.Fatal(fmt.Sprintf("Error deleting file %s: %v", absPath, err))
+				return fmt.Errorf("deleting invalid file %s: %w", absPath, err)
 			}
 		}
-		delete(inst.FileMap, filePath)
 	}
+	ver.Stop()
 
 	inst.Progress.TotalChunks = len(inst.ChunkMap)
 	inst.ComputeTotalBytes()
