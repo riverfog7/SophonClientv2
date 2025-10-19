@@ -1,6 +1,7 @@
 package main
 
 import (
+	"SophonClientv2/internal/logging"
 	"SophonClientv2/pkg/hypAPI"
 	"SophonClientv2/pkg/operations"
 	"fmt"
@@ -38,12 +39,34 @@ func main() {
 		}
 	}
 
-	_ = operations.GetManifest("hkrpg", "os", "game", "main")
-	_ = operations.GetManifest("hkrpg", "cn", "game", "main")
-	_ = operations.GetManifest("hk4e", "os", "game", "main")
-	_ = operations.GetManifest("hk4e", "cn", "game", "main")
-	_ = operations.GetManifest("bh3", "os", "game", "main")
-	_ = operations.GetManifest("bh3", "cn", "game", "main")
-	_ = operations.GetManifest("nap", "os", "game", "main")
-	_ = operations.GetManifest("nap", "cn", "game", "main")
+	mani, info := operations.GetManifest("hkrpg", "os", "game", "main")
+	installer := operations.NewInstaller(".", ".", 100)
+	_ = installer.ParseManifest(mani, info.ChunkDownload)
+	mani, info = operations.GetManifest("hkrpg", "cn", "game", "main")
+	installer = operations.NewInstaller(".", ".", 100)
+	_ = installer.ParseManifest(mani, info.ChunkDownload)
+	mani, info = operations.GetManifest("hk4e", "os", "game", "main")
+	installer = operations.NewInstaller(".", ".", 100)
+	_ = installer.ParseManifest(mani, info.ChunkDownload)
+	mani, info = operations.GetManifest("hk4e", "cn", "game", "main")
+	installer = operations.NewInstaller(".", ".", 100)
+	_ = installer.ParseManifest(mani, info.ChunkDownload)
+	mani, info = operations.GetManifest("bh3", "os", "game", "main")
+	installer = operations.NewInstaller(".", ".", 100)
+	_ = installer.ParseManifest(mani, info.ChunkDownload)
+	mani, info = operations.GetManifest("bh3", "cn", "game", "main")
+	installer = operations.NewInstaller(".", ".", 100)
+	_ = installer.ParseManifest(mani, info.ChunkDownload)
+	mani, info = operations.GetManifest("nap", "os", "game", "main")
+	installer = operations.NewInstaller(".", ".", 100)
+	_ = installer.ParseManifest(mani, info.ChunkDownload)
+	mani, info = operations.GetManifest("nap", "cn", "game", "main")
+	installer = operations.NewInstaller(".", ".", 100)
+	_ = installer.ParseManifest(mani, info.ChunkDownload)
+
+	logging.GlobalLogger.Warn("Testing with real game files")
+	installer = operations.NewInstaller("/Volumes/SSD/Games/Genshin Impact game", "./cache", 1024)
+	mani, info = operations.GetManifest("hk4e", "os", "game", "main")
+	_ = installer.ParseManifest(mani, info.ChunkDownload)
+	_ = installer.Prepare()
 }
