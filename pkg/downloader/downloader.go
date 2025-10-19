@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strconv"
 	"sync"
+	"time"
 )
 
 type DownloaderInput struct {
@@ -92,7 +93,20 @@ func NewDownloader(buffSize int) *Downloader {
 	inputQueue := make(chan DownloaderInput, buffSize)
 	outputQueue := make(chan DownloaderOutput, buffSize)
 	workers := make([]*DownloaderWorker, threadCount)
-	httpClient := &http.Client{}
+
+	transport := &http.Transport{
+		MaxIdleConns:        100,              // Maximum idle connections across all hosts
+		MaxIdleConnsPerHost: threadCount * 2,  // Maximum idle connections per host
+		MaxConnsPerHost:     threadCount * 2,  // Maximum connections per host
+		IdleConnTimeout:     90 * time.Second, // How long idle connections stay open
+		DisableKeepAlives:   false,            // Enable keep-alive (connection reuse)
+	}
+
+	httpClient := &http.Client{
+		Transport: transport,
+		Timeout:   5 * time.Minute,
+	}
+
 	wg := &sync.WaitGroup{}
 
 	for i := 0; i < threadCount; i++ {
