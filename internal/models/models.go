@@ -8,7 +8,7 @@ type GameOperationRequest struct {
 
 type InstallRequest struct {
 	GameOperationRequest
-	InstallRelType string `json:"install_reltype" validate:"oneof=os cn bb"`
+	InstallRelType string `json:"install_reltype" validate:"oneof=os cn"`
 }
 
 type UpdateRequest struct {
@@ -35,7 +35,7 @@ type TaskStatus struct {
 }
 
 type OnlineGameInfo struct {
-	GameType           string   `json:"game_type" validate:"oneof=hk4e nap ''"`
+	GameType           string   `json:"game_type" validate:"oneof=hk4e nap hkrpg''"`
 	Version            string   `json:"version"`
 	InstallSize        int64    `json:"install_size"`
 	UpdatableVersions  []string `json:"updatable_versions"`
