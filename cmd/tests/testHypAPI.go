@@ -44,7 +44,7 @@ func main() {
 	if sophonBuild.Retcode != 0 {
 		fmt.Printf("Error fetching Sophon build for %s: %s\n", branch.Branch, sophonBuild.Message)
 	} else {
-		man := manifest.GetManifest(sophonBuild.Data.Manifests[0])
-		StructPrettyPrint(man)
+		_ = manifest.GetManifest(sophonBuild.Data.Manifests[0])
+		//StructPrettyPrint(man)
 	}
 }
