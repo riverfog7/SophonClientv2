@@ -3,6 +3,7 @@ package verifier
 import (
 	"SophonClientv2/internal/config"
 	"SophonClientv2/internal/logging"
+	"bytes"
 	"crypto/md5"
 	"encoding/hex"
 	"io"
@@ -18,6 +19,7 @@ type VerifierInput struct {
 }
 
 type VerifierOutput struct {
+	Content  io.ReadCloser
 	Suceeded bool
 	Payload  any
 }
@@ -54,14 +56,16 @@ func (worker *VerifierWorker) Start() {
 		defer worker.wg.Done()
 		for input := range worker.InputQueue {
 			// Streaming MD5 computation
+			var buf bytes.Buffer
 			hash := md5.New()
-			if _, err := io.Copy(hash, input.Content); err != nil {
+			teeReader := io.TeeReader(input.Content, &buf) // for passing content (no consume content)
+			if _, err := io.Copy(hash, teeReader); err != nil {
 				if cerr := input.Content.Close(); cerr != nil {
 					logging.GlobalLogger.Error("Worker " + strconv.Itoa(worker.Id) + ": Error closing content after read failure: " + cerr.Error())
 				}
 				logging.GlobalLogger.Error("Worker " + strconv.Itoa(worker.Id) + ": Failed to read content: " + err.Error() + " for " + input.Name)
 				logging.GlobalLogger.Error("Worker " + strconv.Itoa(worker.Id) + ": Marking verification as failed for " + input.Name)
-				worker.OutputQueue <- VerifierOutput{Suceeded: false, Payload: input.Payload}
+				worker.OutputQueue <- VerifierOutput{Content: nil, Suceeded: false, Payload: input.Payload}
 				continue
 			}
 			if cerr := input.Content.Close(); cerr != nil {
@@ -72,12 +76,12 @@ func (worker *VerifierWorker) Start() {
 
 			if computedHex != input.ExpectedMD5 {
 				logging.GlobalLogger.Warn("Worker " + strconv.Itoa(worker.Id) + ": MD5 mismatch - expected " + input.ExpectedMD5 + ", got " + computedHex + " for " + input.Name)
-				worker.OutputQueue <- VerifierOutput{Suceeded: false, Payload: input.Payload}
+				worker.OutputQueue <- VerifierOutput{Content: nil, Suceeded: false, Payload: input.Payload}
 				continue
 			}
 
 			logging.GlobalLogger.Debug("Worker " + strconv.Itoa(worker.Id) + ": MD5 verified successfully for " + input.Name)
-			worker.OutputQueue <- VerifierOutput{Suceeded: true, Payload: input.Payload}
+			worker.OutputQueue <- VerifierOutput{Content: io.NopCloser(bytes.NewReader(buf.Bytes())), Suceeded: true, Payload: input.Payload}
 		}
 	}()
 }
