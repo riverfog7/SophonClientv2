@@ -1,43 +1,43 @@
 package logging
 
 import (
+	"SophonClientv2/internal/config"
 	"fmt"
 	"os"
 	"path/filepath"
 )
 
 type Logger struct {
-	LogToFIle bool
+	LogToFile bool
 	LogFile   *os.File // Optional, used if LogToFile is true
 }
 
 func NewLogger() *Logger {
-	LogFile := os.Getenv("SOPHON_LOG")
-	if LogFile != "" {
-		dir := filepath.Dir(LogFile)
-		err := os.MkdirAll(dir, 075)
-		if err != nil {
+	if config.Config.SophonLogToFile {
+		filePath := config.Config.SophonLogFile
+		dir := filepath.Dir(filePath)
+		if err := os.MkdirAll(dir, 0755); err != nil {
 			panic(err)
 		}
 
-		file, err := os.OpenFile(LogFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+		file, err := os.OpenFile(filePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
 		if err != nil {
 			panic(err)
 		}
 		return &Logger{
-			LogToFIle: true,
+			LogToFile: true,
 			LogFile:   file,
 		}
 	}
 
 	return &Logger{
-		LogToFIle: false,
+		LogToFile: false,
 		LogFile:   nil,
 	}
 }
 
 func (l *Logger) HandleMessage(message string) {
-	if l.LogToFIle {
+	if l.LogToFile {
 		_, err := l.LogFile.WriteString(message + "\n")
 		if err != nil {
 			panic(err)
@@ -50,8 +50,11 @@ func (l *Logger) HandleMessage(message string) {
 }
 
 func (l *Logger) Debug(message string) {
+	if config.Config.SophonLogLevel > config.Debug {
+		return
+	}
 	debugPrefix := "[DEBUG] "
-	if l.LogToFIle {
+	if l.LogToFile {
 		l.HandleMessage(debugPrefix + message)
 	} else {
 		debugColored := "\033[34m" + debugPrefix + message + "\033[0m"
@@ -60,8 +63,11 @@ func (l *Logger) Debug(message string) {
 }
 
 func (l *Logger) Info(message string) {
+	if config.Config.SophonLogLevel > config.Info {
+		return
+	}
 	infoPrefix := "[INFO] "
-	if l.LogToFIle {
+	if l.LogToFile {
 		l.HandleMessage(infoPrefix + message)
 	} else {
 		infoColored := "\033[32m" + infoPrefix + message + "\033[0m"
@@ -70,8 +76,11 @@ func (l *Logger) Info(message string) {
 }
 
 func (l *Logger) Warn(message string) {
+	if config.Config.SophonLogLevel > config.Warn {
+		return
+	}
 	warnPrefix := "[WARN] "
-	if l.LogToFIle {
+	if l.LogToFile {
 		l.HandleMessage(warnPrefix + message)
 	} else {
 		warnColored := "\033[33m" + warnPrefix + message + "\033[0m"
@@ -80,8 +89,11 @@ func (l *Logger) Warn(message string) {
 }
 
 func (l *Logger) Error(message string) {
+	if config.Config.SophonLogLevel > config.Error {
+		return
+	}
 	errorPrefix := "[ERROR] "
-	if l.LogToFIle {
+	if l.LogToFile {
 		l.HandleMessage(errorPrefix + message)
 	} else {
 		errorColored := "\033[31m" + errorPrefix + message + "\033[0m"
@@ -91,7 +103,7 @@ func (l *Logger) Error(message string) {
 
 func (l *Logger) Fatal(message string) {
 	fatalPrefix := "[FATAL] "
-	if l.LogToFIle {
+	if l.LogToFile {
 		l.HandleMessage(fatalPrefix + message)
 	} else {
 		fatalColored := "\033[35m" + fatalPrefix + message + "\033[0m"
