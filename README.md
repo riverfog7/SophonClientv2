@@ -1,0 +1,12 @@
+## TODO
+- [ ] Fix Install not enqueuing failed files properly
+- [ ] Refactor complicated install logic and goroutine usage (Proper mutex for indicating start / end)
+- [ ] Parse update manifest
+- [ ] Implement update logic (Cocurrent or sequential?)
+- [ ] Audiopack support
+- [ ] Fix deleteAll somehow not deleting staging and failed files
+- [ ] Implement REST API server, websocket communication protocol
+- [ ] Implement graceful shutdown properly
+- [ ] Fix server sending go away when cocurrent installs are happening
+- [ ] Implement progress handlers for reporting progress
+- [ ] Write CI/CD pipeline
