@@ -22,8 +22,12 @@ func (inst *Installer) EnqueueChunks() {
 	go func() {
 		defer inst.wg.Done()
 		for _, cm := range orderedChunks {
-			inst.InputQueue <- ChunksInput{
-				Metadata: cm,
+			select {
+			case inst.InputQueue <- ChunksInput{Metadata: cm}:
+			default:
+				go func(chunk *ChunkMetaData) {
+					inst.InputQueue <- ChunksInput{Metadata: chunk}
+				}(cm)
 			}
 		}
 		logging.GlobalLogger.Info("All initial chunks enqueued")
@@ -56,8 +60,12 @@ func (inst *Installer) DecompressChunks() {
 			if !downloadOutput.Suceeded {
 				logging.GlobalLogger.Warn(fmt.Sprintf("Download failed for chunk %s, re-enqueueing", cm.ChunkID))
 
-				inst.InputQueue <- ChunksInput{
-					Metadata: cm,
+				select {
+				case inst.InputQueue <- ChunksInput{Metadata: cm}:
+				default:
+					go func(chunk *ChunkMetaData) {
+						inst.InputQueue <- ChunksInput{Metadata: chunk}
+					}(cm)
 				}
 				continue
 			}
@@ -92,8 +100,12 @@ func (inst *Installer) VerifyChunks() {
 			if !decompressOutput.Suceeded {
 				logging.GlobalLogger.Warn(fmt.Sprintf("Decompression failed for chunk %s, re-enqueueing", cm.ChunkID))
 
-				inst.InputQueue <- ChunksInput{
-					Metadata: cm,
+				select {
+				case inst.InputQueue <- ChunksInput{Metadata: cm}:
+				default:
+					go func(chunk *ChunkMetaData) {
+						inst.InputQueue <- ChunksInput{Metadata: chunk}
+					}(cm)
 				}
 
 				// Adjust downloaded bytes since we are re-enqueueing
@@ -126,8 +138,12 @@ func (inst *Installer) AssembleChunks() {
 			if !verifyOutput.Suceeded {
 				logging.GlobalLogger.Warn(fmt.Sprintf("Verification failed for chunk %s, re-enqueueing", cm.ChunkID))
 
-				inst.InputQueue <- ChunksInput{
-					Metadata: cm,
+				select {
+				case inst.InputQueue <- ChunksInput{Metadata: cm}:
+				default:
+					go func(chunk *ChunkMetaData) {
+						inst.InputQueue <- ChunksInput{Metadata: chunk}
+					}(cm)
 				}
 
 				// Adjust downloaded bytes since we are re-enqueueing
@@ -151,9 +167,15 @@ func (inst *Installer) AssembleChunks() {
 
 			if err != nil {
 				logging.GlobalLogger.Error(fmt.Sprintf("Failed to read verified content for chunk %s: %v, re-enqueueing", cm.ChunkID, err))
-				inst.InputQueue <- ChunksInput{
-					Metadata: cm,
+
+				select {
+				case inst.InputQueue <- ChunksInput{Metadata: cm}:
+				default:
+					go func(chunk *ChunkMetaData) {
+						inst.InputQueue <- ChunksInput{Metadata: chunk}
+					}(cm)
 				}
+
 				inst.Progress.mu.Lock()
 				inst.Progress.TotalBytes += int64(cm.CompressedSize)
 				inst.Progress.mu.Unlock()
@@ -184,8 +206,12 @@ func (inst *Installer) VerifyFiles() {
 			if !assemblerOutput.Succeeded {
 				logging.GlobalLogger.Warn(fmt.Sprintf("Assembly failed for chunk %s, re-enqueueing", cm.ChunkID))
 
-				inst.InputQueue <- ChunksInput{
-					Metadata: cm,
+				select {
+				case inst.InputQueue <- ChunksInput{Metadata: cm}:
+				default:
+					go func(chunk *ChunkMetaData) {
+						inst.InputQueue <- ChunksInput{Metadata: chunk}
+					}(cm)
 				}
 
 				// Adjust downloaded bytes since we are re-enqueueing
@@ -211,7 +237,11 @@ func (inst *Installer) VerifyFiles() {
 					if err != nil {
 						logging.GlobalLogger.Error(fmt.Sprintf("Failed to open completed file %s: %v - re-enqueueing all chunks for this file", stagingPath, err))
 
-						fileChunkCount[dest.File.FilePath] = 0
+						delete(fileChunkCount, dest.File.FilePath)
+
+						if removeErr := os.Remove(stagingPath); removeErr != nil && !os.IsNotExist(removeErr) {
+							logging.GlobalLogger.Warn(fmt.Sprintf("Failed to remove corrupted staging file %s: %v", stagingPath, removeErr))
+						}
 
 						for _, chunkID := range dest.File.Chunks {
 							chunkMeta := inst.ChunkMap[chunkID]
@@ -242,8 +272,16 @@ func (inst *Installer) VerifyFiles() {
 									{File: dest.File, Offset: offset},
 								},
 							}
-							inst.InputQueue <- ChunksInput{
-								Metadata: cm_new,
+
+							select {
+							case inst.InputQueue <- ChunksInput{Metadata: cm_new}:
+								// Successfully enqueued
+							default:
+								// IMPORTANT: Capture the value, not the reference
+								chunkToEnqueue := cm_new
+								go func() {
+									inst.InputQueue <- ChunksInput{Metadata: chunkToEnqueue}
+								}()
 							}
 
 							inst.Progress.mu.Lock()
@@ -276,6 +314,10 @@ func (inst *Installer) MoveFiles() {
 			if !verifyOutput.Suceeded {
 				logging.GlobalLogger.Error(fmt.Sprintf("File verification failed: %s - re-enqueueing all chunks", fm.FilePath))
 
+				if removeErr := os.Remove(stagingPath); removeErr != nil && !os.IsNotExist(removeErr) {
+					logging.GlobalLogger.Warn(fmt.Sprintf("Failed to remove corrupted staging file %s: %v", stagingPath, removeErr))
+				}
+
 				for _, chunkID := range fm.Chunks {
 					cm := inst.ChunkMap[chunkID]
 
@@ -304,8 +346,13 @@ func (inst *Installer) MoveFiles() {
 						},
 					}
 
-					inst.InputQueue <- ChunksInput{
-						Metadata: new_cm,
+					select {
+					case inst.InputQueue <- ChunksInput{Metadata: new_cm}:
+					default:
+						chunkToEnqueue := new_cm
+						go func() {
+							inst.InputQueue <- ChunksInput{Metadata: chunkToEnqueue}
+						}()
 					}
 
 					inst.Progress.mu.Lock()

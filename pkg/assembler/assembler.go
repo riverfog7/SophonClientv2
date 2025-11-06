@@ -93,12 +93,20 @@ func (a *Assembler) Stop() {
 }
 
 func (a *Assembler) EnqueueWrite(filePath string, offset uint64, chunkID string, content io.ReadCloser, payload any) {
-	a.InputQueue <- AssemblerInput{
+	input := AssemblerInput{
 		FilePath: filePath,
 		Offset:   offset,
 		ChunkID:  chunkID,
 		Content:  content,
 		Payload:  payload,
+	}
+
+	select {
+	case a.InputQueue <- input:
+	default:
+		go func() {
+			a.InputQueue <- input
+		}()
 	}
 }
 

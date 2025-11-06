@@ -89,7 +89,13 @@ func (v *Verifier) Stop() {
 }
 
 func (v *Verifier) EnqueueVerification(name string, content io.ReadCloser, expectedMD5 string, payload any) {
-	v.InputQueue <- VerifierInput{Name: name, Content: content, ExpectedMD5: expectedMD5, Payload: payload}
+	select {
+	case v.InputQueue <- VerifierInput{Name: name, Content: content, ExpectedMD5: expectedMD5, Payload: payload}:
+	default:
+		go func() {
+			v.InputQueue <- VerifierInput{Name: name, Content: content, ExpectedMD5: expectedMD5, Payload: payload}
+		}()
+	}
 }
 
 func (v *Verifier) GetOutputChannel() chan VerifierOutput {

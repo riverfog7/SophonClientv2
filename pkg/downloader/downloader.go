@@ -104,7 +104,13 @@ func (d *Downloader) Stop() {
 }
 
 func (d *Downloader) EnqueueDownload(url string, payload any) {
-	d.InputQueue <- DownloaderInput{Url: url, Payload: payload}
+	select {
+	case d.InputQueue <- DownloaderInput{Url: url, Payload: payload}:
+	default:
+		go func() {
+			d.InputQueue <- DownloaderInput{Url: url, Payload: payload}
+		}()
+	}
 }
 
 func (d *Downloader) GetOutputChannel() chan DownloaderOutput {

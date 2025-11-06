@@ -76,7 +76,13 @@ func (d *Decompressor) Stop() {
 }
 
 func (d *Decompressor) EnqueueDecompression(content io.ReadCloser, payload any) {
-	d.InputQueue <- DecompressorInput{Content: content, Payload: payload}
+	select {
+	case d.InputQueue <- DecompressorInput{Content: content, Payload: payload}:
+	default:
+		go func() {
+			d.InputQueue <- DecompressorInput{Content: content, Payload: payload}
+		}()
+	}
 }
 
 func (d *Decompressor) GetOutputChannel() chan DecompressorOutput {
