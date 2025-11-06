@@ -19,6 +19,12 @@ func (inst *Installer) EnqueueChunks() {
 		return
 	}
 
+	if len(orderedChunks) == 0 {
+		logging.GlobalLogger.Info("No chunks to download, nothing to enqueue")
+		close(inst.InputQueue)
+		return
+	}
+
 	inst.wg.Add(1)
 	go func() {
 		defer inst.wg.Done()
