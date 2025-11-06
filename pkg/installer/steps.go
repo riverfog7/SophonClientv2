@@ -198,7 +198,7 @@ func (inst *Installer) VerifyFiles() {
 	inst.wg.Add(1)
 	go func() {
 		defer inst.wg.Done()
-		fileChunkCount := make(map[string]int)
+		fileAssembledChunks := make(map[string]map[string]bool)
 
 		for assemblerOutput := range inst.Assembler.GetOutputChannel() {
 			cm := assemblerOutput.Payload.(*ChunkMetaData)
@@ -226,10 +226,15 @@ func (inst *Installer) VerifyFiles() {
 			inst.Progress.mu.Unlock()
 
 			for _, dest := range cm.Destinations {
-				fileChunkCount[dest.File.FilePath]++
+				filePath := dest.File.FilePath
 
-				// Check if all chunks for the file are assembled
-				if fileChunkCount[dest.File.FilePath] == len(dest.File.Chunks) {
+				if fileAssembledChunks[filePath] == nil {
+					fileAssembledChunks[filePath] = make(map[string]bool)
+				}
+
+				fileAssembledChunks[filePath][cm.ChunkID] = true
+
+				if len(fileAssembledChunks[filePath]) == len(dest.File.Chunks) {
 					stagingPath := filepath.Join(inst.StagingDir, dest.File.FilePath)
 					logging.GlobalLogger.Info(fmt.Sprintf("File complete, verifying: %s", dest.File.FilePath))
 
@@ -237,7 +242,7 @@ func (inst *Installer) VerifyFiles() {
 					if err != nil {
 						logging.GlobalLogger.Error(fmt.Sprintf("Failed to open completed file %s: %v - re-enqueueing all chunks for this file", stagingPath, err))
 
-						delete(fileChunkCount, dest.File.FilePath)
+						delete(fileAssembledChunks, dest.File.FilePath)
 
 						if removeErr := os.Remove(stagingPath); removeErr != nil && !os.IsNotExist(removeErr) {
 							logging.GlobalLogger.Warn(fmt.Sprintf("Failed to remove corrupted staging file %s: %v", stagingPath, removeErr))
