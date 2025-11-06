@@ -11,34 +11,6 @@ import (
 	"sync"
 )
 
-type VerifierInput struct {
-	Name        string
-	Content     io.ReadCloser
-	ExpectedMD5 string
-	Payload     any
-}
-
-type VerifierOutput struct {
-	Content  io.ReadCloser
-	Suceeded bool
-	Payload  any
-}
-
-type VerifierWorker struct {
-	Id          int
-	InputQueue  chan VerifierInput
-	OutputQueue chan VerifierOutput
-	wg          *sync.WaitGroup
-}
-
-type Verifier struct {
-	ThreadCount int
-	InputQueue  chan VerifierInput
-	OutputQueue chan VerifierOutput
-	Workers     []*VerifierWorker
-	wg          *sync.WaitGroup
-}
-
 func NewWorker(id int, inputQueue chan VerifierInput, outputQueue chan VerifierOutput, wg *sync.WaitGroup) *VerifierWorker {
 	return &VerifierWorker{
 		Id:          id,
