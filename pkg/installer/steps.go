@@ -168,6 +168,8 @@ func (inst *Installer) VerifyFiles() {
 		// Track which chunk instances (chunkID+offset) have been assembled for each file
 		// Key: filePath, Value: map of "chunkID:offset" -> bool
 		fileAssembledChunks := make(map[string]map[string]bool)
+		// Cache expected chunk count per file to avoid recomputing
+		fileExpectedChunks := make(map[string]int)
 
 		for assemblerOutput := range inst.Assembler.GetOutputChannel() {
 			cm := assemblerOutput.Payload.(*ChunkMetaData)
@@ -207,16 +209,20 @@ func (inst *Installer) VerifyFiles() {
 				return
 			}
 
+			// Compute expected chunk count only once per file
+			if _, exists := fileExpectedChunks[filePath]; !exists {
+				chunkSet := make(map[string]bool)
+				for _, chunkID := range fileMeta.Chunks {
+					chunkSet[chunkID] = true
+				}
+				fileExpectedChunks[filePath] = len(chunkSet)
+			}
+
 			// Create a unique key for this chunk instance (chunkID:offset)
 			chunkInstanceKey := fmt.Sprintf("%s:%d", cm.ChunkID, offset)
 			fileAssembledChunks[filePath][chunkInstanceKey] = true
 
-			chunkSet := make(map[string]bool)
-			for _, chunkID := range fileMeta.Chunks {
-				chunkSet[chunkID] = true
-			}
-			expectedChunkInstances := len(chunkSet)
-
+			expectedChunkInstances := fileExpectedChunks[filePath]
 			logging.GlobalLogger.Debug(fmt.Sprintf("File %s: Assembled Chunks: %d, Expected Chunk Instances: %d", filePath, len(fileAssembledChunks[filePath]), expectedChunkInstances))
 			if len(fileAssembledChunks[filePath]) == expectedChunkInstances {
 				stagingPath := filepath.Join(inst.StagingDir, filePath)
@@ -227,6 +233,7 @@ func (inst *Installer) VerifyFiles() {
 					logging.GlobalLogger.Error(fmt.Sprintf("Failed to open completed file %s: %v - re-enqueueing all chunks for this file", stagingPath, err))
 
 					delete(fileAssembledChunks, filePath)
+					delete(fileExpectedChunks, filePath)
 
 					if removeErr := os.Remove(stagingPath); removeErr != nil && !os.IsNotExist(removeErr) {
 						logging.GlobalLogger.Warn(fmt.Sprintf("Failed to remove corrupted staging file %s: %v", stagingPath, removeErr))
@@ -274,6 +281,7 @@ func (inst *Installer) VerifyFiles() {
 				inst.Verifier2.EnqueueVerification(filePath, f, fileMeta.MD5, fileMeta)
 
 				delete(fileAssembledChunks, filePath)
+				delete(fileExpectedChunks, filePath)
 			}
 		}
 		logging.GlobalLogger.Info("Assembler output closed, stopping File Verifier")
