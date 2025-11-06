@@ -1,4 +1,4 @@
-package operations
+package installer
 
 import (
 	"SophonClientv2/pkg/assembler"
@@ -32,14 +32,26 @@ type FileMetaData struct {
 }
 
 type InstallProgress struct {
-	TotalChunks      int
-	DownloadedChunks int
-	VerifiedChunks   int
-	AssembledChunks  int
-	TotalBytes       int64
-	DownloadedBytes  int64
-	FailedChunks     []string
-	mu               sync.RWMutex
+	TotalChunks int
+	TotalFiles  int
+
+	DownloadedChunks   int
+	DecompressedChunks int
+	VerifiedChunks     int
+	AssembledChunks    int
+	VerifiedFiles      int
+
+	TotalBytes      int64
+	DownloadedBytes int64
+	mu              sync.RWMutex
+}
+
+type ChunksInput struct {
+	Metadata *ChunkMetaData
+}
+
+type FileOutput struct {
+	FilePath string
 }
 
 type Installer struct {
@@ -50,21 +62,14 @@ type Installer struct {
 	FileMap  map[string]*FileMetaData
 	Progress InstallProgress
 
+	InputQueue  chan ChunksInput
+	OutputQueue chan FileOutput
+
 	Downloader   *downloader.Downloader
 	Decompressor *decompressor.Decompressor
-	Verifier     *verifier.Verifier
+	Verifier     *verifier.Verifier // For chunk verification
 	Assembler    *assembler.Assembler
+	Verifier2    *verifier.Verifier // For file verification
 
 	wg sync.WaitGroup
-}
-
-func NewInstaller(gameDir, stagingDir string) *Installer {
-	return &Installer{
-		GameDir:    gameDir,
-		StagingDir: stagingDir,
-
-		ChunkMap: make(map[string]*ChunkMetaData),
-		FileMap:  make(map[string]*FileMetaData),
-		Progress: InstallProgress{},
-	}
 }
