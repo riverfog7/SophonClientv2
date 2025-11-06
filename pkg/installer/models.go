@@ -62,8 +62,7 @@ type Installer struct {
 	FileMap  map[string]*FileMetaData
 	Progress InstallProgress
 
-	InputQueue  chan ChunksInput
-	OutputQueue chan FileOutput
+	InputQueue chan ChunksInput
 
 	Downloader   *downloader.Downloader
 	Decompressor *decompressor.Decompressor

@@ -84,6 +84,7 @@ func (inst *Installer) Prepare() error {
 	ver.Stop()
 	inst.Progress.mu.Lock()
 	inst.Progress.TotalChunks = len(inst.ChunkMap)
+	inst.Progress.TotalFiles = len(inst.FileMap)
 	inst.Progress.mu.Unlock()
 	inst.ComputeTotalBytes()
 	logging.GlobalLogger.Info(fmt.Sprintf("Prepare complete, %d chunks, %d files, total %d bytes remaining", inst.Progress.TotalChunks, len(inst.FileMap), inst.Progress.TotalBytes))

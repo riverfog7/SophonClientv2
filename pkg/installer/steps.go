@@ -18,29 +18,38 @@ func (inst *Installer) EnqueueChunks() {
 		return
 	}
 
+	inst.wg.Add(1)
 	go func() {
+		defer inst.wg.Done()
 		for _, cm := range orderedChunks {
 			inst.InputQueue <- ChunksInput{
 				Metadata: cm,
 			}
 		}
+		logging.GlobalLogger.Info("All initial chunks enqueued")
 	}()
 }
 
 func (inst *Installer) DownloadChunks() {
 	logging.GlobalLogger.Info("Starting chunk download")
 
+	inst.wg.Add(1)
 	go func() {
+		defer inst.wg.Done()
 		for input := range inst.InputQueue {
 			inst.Downloader.EnqueueDownload(input.Metadata.URL, input.Metadata)
 		}
+		logging.GlobalLogger.Info("InputQueue closed, stopping Downloader")
+		inst.Downloader.Stop()
 	}()
 }
 
 func (inst *Installer) DecompressChunks() {
 	logging.GlobalLogger.Info("Starting chunk decompression")
 
+	inst.wg.Add(1)
 	go func() {
+		defer inst.wg.Done()
 		for downloadOutput := range inst.Downloader.GetOutputChannel() {
 			cm := downloadOutput.Payload.(*ChunkMetaData)
 
@@ -66,13 +75,17 @@ func (inst *Installer) DecompressChunks() {
 				return
 			}
 		}
+		logging.GlobalLogger.Info("Downloader output closed, stopping Decompressor")
+		inst.Decompressor.Stop()
 	}()
 }
 
 func (inst *Installer) VerifyChunks() {
 	logging.GlobalLogger.Info("Starting chunk verification")
 
+	inst.wg.Add(1)
 	go func() {
+		defer inst.wg.Done()
 		for decompressOutput := range inst.Decompressor.GetOutputChannel() {
 			cm := decompressOutput.Payload.(*ChunkMetaData)
 
@@ -96,13 +109,17 @@ func (inst *Installer) VerifyChunks() {
 			inst.Progress.DecompressedChunks++
 			inst.Progress.mu.Unlock()
 		}
+		logging.GlobalLogger.Info("Decompressor output closed, stopping Verifier")
+		inst.Verifier.Stop()
 	}()
 }
 
 func (inst *Installer) AssembleChunks() {
 	logging.GlobalLogger.Info("Starting chunk assembly")
 
+	inst.wg.Add(1)
 	go func() {
+		defer inst.wg.Done()
 		for verifyOutput := range inst.Verifier.GetOutputChannel() {
 			cm := verifyOutput.Payload.(*ChunkMetaData)
 
@@ -148,13 +165,17 @@ func (inst *Installer) AssembleChunks() {
 				inst.Assembler.EnqueueWrite(dest.File.FilePath, dest.Offset, cm.ChunkID, io.NopCloser(bytes.NewReader(contentBytes)), cm)
 			}
 		}
+		logging.GlobalLogger.Info("Verifier output closed, stopping Assembler")
+		inst.Assembler.Stop()
 	}()
 }
 
 func (inst *Installer) VerifyFiles() {
 	logging.GlobalLogger.Info("Starting file verification")
 
+	inst.wg.Add(1)
 	go func() {
+		defer inst.wg.Done()
 		fileChunkCount := make(map[string]int)
 
 		for assemblerOutput := range inst.Assembler.GetOutputChannel() {
@@ -236,13 +257,17 @@ func (inst *Installer) VerifyFiles() {
 				}
 			}
 		}
+		logging.GlobalLogger.Info("Assembler output closed, stopping File Verifier")
+		inst.Verifier2.Stop()
 	}()
 }
 
 func (inst *Installer) MoveFiles() {
 	logging.GlobalLogger.Info("Starting file move to game directory")
 
+	inst.wg.Add(1)
 	go func() {
+		defer inst.wg.Done()
 		for verifyOutput := range inst.Verifier2.GetOutputChannel() {
 			fm := verifyOutput.Payload.(*FileMetaData)
 			stagingPath := filepath.Join(inst.StagingDir, fm.FilePath)
@@ -305,7 +330,15 @@ func (inst *Installer) MoveFiles() {
 
 			inst.Progress.mu.Lock()
 			inst.Progress.VerifiedFiles++
+			verifiedFiles := inst.Progress.VerifiedFiles
+			totalFiles := inst.Progress.TotalFiles
 			inst.Progress.mu.Unlock()
+
+			if verifiedFiles >= totalFiles {
+				logging.GlobalLogger.Info("All files verified and moved, closing InputQueue to shut down pipeline")
+				close(inst.InputQueue)
+			}
 		}
+		logging.GlobalLogger.Info("File Verifier output closed, file move complete")
 	}()
 }

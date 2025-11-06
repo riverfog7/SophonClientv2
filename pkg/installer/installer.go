@@ -17,8 +17,7 @@ func NewInstaller(gameDir, stagingDir string, queueSize int) *Installer {
 		FileMap:  make(map[string]*FileMetaData),
 		Progress: InstallProgress{},
 
-		InputQueue:  make(chan ChunksInput, queueSize),
-		OutputQueue: make(chan FileOutput, queueSize),
+		InputQueue: make(chan ChunksInput, queueSize),
 
 		Downloader:   downloader.NewDownloader(config.Config.DownloadChanSize),
 		Decompressor: decompressor.NewDecompressor(config.Config.DecompressChanSize),
