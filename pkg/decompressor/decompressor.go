@@ -3,6 +3,7 @@ package decompressor
 import (
 	"SophonClientv2/internal/config"
 	"SophonClientv2/internal/logging"
+	"SophonClientv2/pkg/utils"
 	"io"
 	"strconv"
 	"sync"
@@ -76,13 +77,7 @@ func (d *Decompressor) Stop() {
 }
 
 func (d *Decompressor) EnqueueDecompression(content io.ReadCloser, payload any) {
-	select {
-	case d.InputQueue <- DecompressorInput{Content: content, Payload: payload}:
-	default:
-		go func() {
-			d.InputQueue <- DecompressorInput{Content: content, Payload: payload}
-		}()
-	}
+	utils.NonBlockingEnqueue(d.InputQueue, DecompressorInput{Content: content, Payload: payload})
 }
 
 func (d *Decompressor) GetOutputChannel() chan DecompressorOutput {

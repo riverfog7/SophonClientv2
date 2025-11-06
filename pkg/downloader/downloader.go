@@ -3,6 +3,7 @@ package downloader
 import (
 	"SophonClientv2/internal/config"
 	"SophonClientv2/internal/logging"
+	"SophonClientv2/pkg/utils"
 	"io"
 	"net/http"
 	"strconv"
@@ -104,13 +105,7 @@ func (d *Downloader) Stop() {
 }
 
 func (d *Downloader) EnqueueDownload(url string, payload any) {
-	select {
-	case d.InputQueue <- DownloaderInput{Url: url, Payload: payload}:
-	default:
-		go func() {
-			d.InputQueue <- DownloaderInput{Url: url, Payload: payload}
-		}()
-	}
+	utils.NonBlockingEnqueue(d.InputQueue, DownloaderInput{Url: url, Payload: payload})
 }
 
 func (d *Downloader) GetOutputChannel() chan DownloaderOutput {

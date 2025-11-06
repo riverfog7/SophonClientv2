@@ -1,13 +1,13 @@
 package assembler
 
 import (
+	"SophonClientv2/internal/logging"
+	"SophonClientv2/pkg/utils"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"sync"
-
-	"SophonClientv2/internal/logging"
 )
 
 func NewAssembler(stagingDir string, buffSize int) *Assembler {
@@ -101,13 +101,7 @@ func (a *Assembler) EnqueueWrite(filePath string, offset uint64, chunkID string,
 		Payload:  payload,
 	}
 
-	select {
-	case a.InputQueue <- input:
-	default:
-		go func() {
-			a.InputQueue <- input
-		}()
-	}
+	utils.NonBlockingEnqueue(a.InputQueue, input)
 }
 
 func (a *Assembler) GetOutputChannel() chan AssemblerOutput {

@@ -2,6 +2,7 @@ package installer
 
 import (
 	"SophonClientv2/internal/logging"
+	"SophonClientv2/pkg/utils"
 	"bytes"
 	"fmt"
 	"io"
@@ -22,13 +23,7 @@ func (inst *Installer) EnqueueChunks() {
 	go func() {
 		defer inst.wg.Done()
 		for _, cm := range orderedChunks {
-			select {
-			case inst.InputQueue <- ChunksInput{Metadata: cm}:
-			default:
-				go func(chunk *ChunkMetaData) {
-					inst.InputQueue <- ChunksInput{Metadata: chunk}
-				}(cm)
-			}
+			utils.NonBlockingEnqueue(inst.InputQueue, ChunksInput{Metadata: cm})
 		}
 		logging.GlobalLogger.Info("All initial chunks enqueued")
 	}()
@@ -59,14 +54,7 @@ func (inst *Installer) DecompressChunks() {
 
 			if !downloadOutput.Suceeded {
 				logging.GlobalLogger.Warn(fmt.Sprintf("Download failed for chunk %s, re-enqueueing", cm.ChunkID))
-
-				select {
-				case inst.InputQueue <- ChunksInput{Metadata: cm}:
-				default:
-					go func(chunk *ChunkMetaData) {
-						inst.InputQueue <- ChunksInput{Metadata: chunk}
-					}(cm)
-				}
+				utils.NonBlockingEnqueue(inst.InputQueue, ChunksInput{Metadata: cm})
 				continue
 			}
 
@@ -99,14 +87,7 @@ func (inst *Installer) VerifyChunks() {
 
 			if !decompressOutput.Suceeded {
 				logging.GlobalLogger.Warn(fmt.Sprintf("Decompression failed for chunk %s, re-enqueueing", cm.ChunkID))
-
-				select {
-				case inst.InputQueue <- ChunksInput{Metadata: cm}:
-				default:
-					go func(chunk *ChunkMetaData) {
-						inst.InputQueue <- ChunksInput{Metadata: chunk}
-					}(cm)
-				}
+				utils.NonBlockingEnqueue(inst.InputQueue, ChunksInput{Metadata: cm})
 
 				// Adjust downloaded bytes since we are re-enqueueing
 				inst.Progress.mu.Lock()
@@ -137,14 +118,7 @@ func (inst *Installer) AssembleChunks() {
 
 			if !verifyOutput.Suceeded {
 				logging.GlobalLogger.Warn(fmt.Sprintf("Verification failed for chunk %s, re-enqueueing", cm.ChunkID))
-
-				select {
-				case inst.InputQueue <- ChunksInput{Metadata: cm}:
-				default:
-					go func(chunk *ChunkMetaData) {
-						inst.InputQueue <- ChunksInput{Metadata: chunk}
-					}(cm)
-				}
+				utils.NonBlockingEnqueue(inst.InputQueue, ChunksInput{Metadata: cm})
 
 				// Adjust downloaded bytes since we are re-enqueueing
 				inst.Progress.mu.Lock()
@@ -167,14 +141,7 @@ func (inst *Installer) AssembleChunks() {
 
 			if err != nil {
 				logging.GlobalLogger.Error(fmt.Sprintf("Failed to read verified content for chunk %s: %v, re-enqueueing", cm.ChunkID, err))
-
-				select {
-				case inst.InputQueue <- ChunksInput{Metadata: cm}:
-				default:
-					go func(chunk *ChunkMetaData) {
-						inst.InputQueue <- ChunksInput{Metadata: chunk}
-					}(cm)
-				}
+				utils.NonBlockingEnqueue(inst.InputQueue, ChunksInput{Metadata: cm})
 
 				inst.Progress.mu.Lock()
 				inst.Progress.TotalBytes += int64(cm.CompressedSize)
@@ -206,14 +173,7 @@ func (inst *Installer) VerifyFiles() {
 
 			if !assemblerOutput.Succeeded {
 				logging.GlobalLogger.Warn(fmt.Sprintf("Assembly failed for chunk %s, re-enqueueing", cm.ChunkID))
-
-				select {
-				case inst.InputQueue <- ChunksInput{Metadata: cm}:
-				default:
-					go func(chunk *ChunkMetaData) {
-						inst.InputQueue <- ChunksInput{Metadata: chunk}
-					}(cm)
-				}
+				utils.NonBlockingEnqueue(inst.InputQueue, ChunksInput{Metadata: cm})
 
 				// Adjust downloaded bytes since we are re-enqueueing
 				inst.Progress.mu.Lock()
@@ -288,14 +248,7 @@ func (inst *Installer) VerifyFiles() {
 							},
 						}
 
-						select {
-						case inst.InputQueue <- ChunksInput{Metadata: cm_new}:
-						default:
-							chunkToEnqueue := cm_new
-							go func() {
-								inst.InputQueue <- ChunksInput{Metadata: chunkToEnqueue}
-							}()
-						}
+						utils.NonBlockingEnqueue(inst.InputQueue, ChunksInput{Metadata: cm_new})
 
 						inst.Progress.mu.Lock()
 						inst.Progress.TotalBytes += int64(chunkMeta.CompressedSize)
@@ -360,14 +313,7 @@ func (inst *Installer) MoveFiles() {
 						},
 					}
 
-					select {
-					case inst.InputQueue <- ChunksInput{Metadata: new_cm}:
-					default:
-						chunkToEnqueue := new_cm
-						go func() {
-							inst.InputQueue <- ChunksInput{Metadata: chunkToEnqueue}
-						}()
-					}
+					utils.NonBlockingEnqueue(inst.InputQueue, ChunksInput{Metadata: new_cm})
 
 					inst.Progress.mu.Lock()
 					inst.Progress.TotalBytes += int64(cm.CompressedSize)

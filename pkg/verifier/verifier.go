@@ -3,6 +3,7 @@ package verifier
 import (
 	"SophonClientv2/internal/config"
 	"SophonClientv2/internal/logging"
+	"SophonClientv2/pkg/utils"
 	"bytes"
 	"crypto/md5"
 	"encoding/hex"
@@ -89,13 +90,7 @@ func (v *Verifier) Stop() {
 }
 
 func (v *Verifier) EnqueueVerification(name string, content io.ReadCloser, expectedMD5 string, payload any) {
-	select {
-	case v.InputQueue <- VerifierInput{Name: name, Content: content, ExpectedMD5: expectedMD5, Payload: payload}:
-	default:
-		go func() {
-			v.InputQueue <- VerifierInput{Name: name, Content: content, ExpectedMD5: expectedMD5, Payload: payload}
-		}()
-	}
+	utils.NonBlockingEnqueue(v.InputQueue, VerifierInput{Name: name, Content: content, ExpectedMD5: expectedMD5, Payload: payload})
 }
 
 func (v *Verifier) GetOutputChannel() chan VerifierOutput {
