@@ -188,27 +188,46 @@ func (inst *Installer) VerifyFiles() {
 
 					f, err := os.Open(stagingPath)
 					if err != nil {
-						logging.GlobalLogger.Error(fmt.Sprintf("Failed to open completed file %s: %v", stagingPath, err))
+						logging.GlobalLogger.Error(fmt.Sprintf("Failed to open completed file %s: %v - re-enqueueing all chunks for this file", stagingPath, err))
 
 						fileChunkCount[dest.File.FilePath] = 0
-						inst.Progress.mu.Lock()
-						inst.Progress.TotalBytes += int64(cm.CompressedSize)
-						inst.Progress.mu.Unlock()
 
-						// Create new ChunkMetaData for re-enqueueing (only for this file)
-						cm_new := &ChunkMetaData{
-							ChunkID:          cm.ChunkID,
-							URL:              cm.URL,
-							MD5:              cm.MD5,
-							CompressedSize:   cm.CompressedSize,
-							UncompressedSize: cm.UncompressedSize,
-							IsCompressed:     cm.IsCompressed,
-							Destinations: []ChunkDestination{
-								{File: dest.File, Offset: dest.Offset},
-							},
-						}
-						inst.InputQueue <- ChunksInput{
-							Metadata: cm_new,
+						for _, chunkID := range dest.File.Chunks {
+							chunkMeta := inst.ChunkMap[chunkID]
+
+							var offset uint64
+							var found bool
+							for _, d := range chunkMeta.Destinations {
+								if d.File == dest.File {
+									offset = d.Offset
+									found = true
+									break
+								}
+							}
+							if !found {
+								logging.GlobalLogger.Fatal(fmt.Sprintf("Offset not found for file %s in chunk %s", dest.File.FilePath, chunkID))
+								return
+							}
+
+							// Create new ChunkMetaData for re-enqueueing (only for this file)
+							cm_new := &ChunkMetaData{
+								ChunkID:          chunkMeta.ChunkID,
+								URL:              chunkMeta.URL,
+								MD5:              chunkMeta.MD5,
+								CompressedSize:   chunkMeta.CompressedSize,
+								UncompressedSize: chunkMeta.UncompressedSize,
+								IsCompressed:     chunkMeta.IsCompressed,
+								Destinations: []ChunkDestination{
+									{File: dest.File, Offset: offset},
+								},
+							}
+							inst.InputQueue <- ChunksInput{
+								Metadata: cm_new,
+							}
+
+							inst.Progress.mu.Lock()
+							inst.Progress.TotalBytes += int64(chunkMeta.CompressedSize)
+							inst.Progress.mu.Unlock()
 						}
 						continue
 					}
