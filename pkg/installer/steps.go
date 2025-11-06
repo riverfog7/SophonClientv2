@@ -165,6 +165,8 @@ func (inst *Installer) VerifyFiles() {
 	inst.wg.Add(1)
 	go func() {
 		defer inst.wg.Done()
+		// Track which chunk instances (chunkID+offset) have been assembled for each file
+		// Key: filePath, Value: map of "chunkID:offset" -> bool
 		fileAssembledChunks := make(map[string]map[string]bool)
 
 		for assemblerOutput := range inst.Assembler.GetOutputChannel() {
@@ -189,12 +191,14 @@ func (inst *Installer) VerifyFiles() {
 			if fileAssembledChunks[filePath] == nil {
 				fileAssembledChunks[filePath] = make(map[string]bool)
 			}
-			fileAssembledChunks[filePath][cm.ChunkID] = true
 
+			// Find the offset for this specific file to create a unique key
+			var offset uint64
 			var fileMeta *FileMetaData
 			for _, dest := range cm.Destinations {
 				if dest.File.FilePath == filePath {
 					fileMeta = dest.File
+					offset = dest.Offset
 					break
 				}
 			}
@@ -203,8 +207,18 @@ func (inst *Installer) VerifyFiles() {
 				return
 			}
 
-			// Check if all chunks for the file are assembled
-			if len(fileAssembledChunks[filePath]) == len(fileMeta.Chunks) {
+			// Create a unique key for this chunk instance (chunkID:offset)
+			chunkInstanceKey := fmt.Sprintf("%s:%d", cm.ChunkID, offset)
+			fileAssembledChunks[filePath][chunkInstanceKey] = true
+
+			chunkSet := make(map[string]bool)
+			for _, chunkID := range fileMeta.Chunks {
+				chunkSet[chunkID] = true
+			}
+			expectedChunkInstances := len(chunkSet)
+
+			logging.GlobalLogger.Debug(fmt.Sprintf("File %s: Assembled Chunks: %d, Expected Chunk Instances: %d", filePath, len(fileAssembledChunks[filePath]), expectedChunkInstances))
+			if len(fileAssembledChunks[filePath]) == expectedChunkInstances {
 				stagingPath := filepath.Join(inst.StagingDir, filePath)
 				logging.GlobalLogger.Info(fmt.Sprintf("File complete, verifying: %s", filePath))
 
