@@ -202,6 +202,7 @@ func (inst *Installer) VerifyFiles() {
 
 		for assemblerOutput := range inst.Assembler.GetOutputChannel() {
 			cm := assemblerOutput.Payload.(*ChunkMetaData)
+			filePath := assemblerOutput.FilePath
 
 			if !assemblerOutput.Succeeded {
 				logging.GlobalLogger.Warn(fmt.Sprintf("Assembly failed for chunk %s, re-enqueueing", cm.ChunkID))
@@ -225,79 +226,87 @@ func (inst *Installer) VerifyFiles() {
 			inst.Progress.AssembledChunks++
 			inst.Progress.mu.Unlock()
 
+			if fileAssembledChunks[filePath] == nil {
+				fileAssembledChunks[filePath] = make(map[string]bool)
+			}
+			fileAssembledChunks[filePath][cm.ChunkID] = true
+
+			var fileMeta *FileMetaData
 			for _, dest := range cm.Destinations {
-				filePath := dest.File.FilePath
-
-				if fileAssembledChunks[filePath] == nil {
-					fileAssembledChunks[filePath] = make(map[string]bool)
+				if dest.File.FilePath == filePath {
+					fileMeta = dest.File
+					break
 				}
+			}
+			if fileMeta == nil {
+				logging.GlobalLogger.Fatal(fmt.Sprintf("File metadata not found for assembled file: %s", filePath))
+				return
+			}
 
-				fileAssembledChunks[filePath][cm.ChunkID] = true
+			// Check if all chunks for the file are assembled
+			if len(fileAssembledChunks[filePath]) == len(fileMeta.Chunks) {
+				stagingPath := filepath.Join(inst.StagingDir, filePath)
+				logging.GlobalLogger.Info(fmt.Sprintf("File complete, verifying: %s", filePath))
 
-				if len(fileAssembledChunks[filePath]) == len(dest.File.Chunks) {
-					stagingPath := filepath.Join(inst.StagingDir, dest.File.FilePath)
-					logging.GlobalLogger.Info(fmt.Sprintf("File complete, verifying: %s", dest.File.FilePath))
+				f, err := os.Open(stagingPath)
+				if err != nil {
+					logging.GlobalLogger.Error(fmt.Sprintf("Failed to open completed file %s: %v - re-enqueueing all chunks for this file", stagingPath, err))
 
-					f, err := os.Open(stagingPath)
-					if err != nil {
-						logging.GlobalLogger.Error(fmt.Sprintf("Failed to open completed file %s: %v - re-enqueueing all chunks for this file", stagingPath, err))
+					delete(fileAssembledChunks, filePath)
 
-						delete(fileAssembledChunks, dest.File.FilePath)
-
-						if removeErr := os.Remove(stagingPath); removeErr != nil && !os.IsNotExist(removeErr) {
-							logging.GlobalLogger.Warn(fmt.Sprintf("Failed to remove corrupted staging file %s: %v", stagingPath, removeErr))
-						}
-
-						for _, chunkID := range dest.File.Chunks {
-							chunkMeta := inst.ChunkMap[chunkID]
-
-							var offset uint64
-							var found bool
-							for _, d := range chunkMeta.Destinations {
-								if d.File == dest.File {
-									offset = d.Offset
-									found = true
-									break
-								}
-							}
-							if !found {
-								logging.GlobalLogger.Fatal(fmt.Sprintf("Offset not found for file %s in chunk %s", dest.File.FilePath, chunkID))
-								return
-							}
-
-							// Create new ChunkMetaData for re-enqueueing (only for this file)
-							cm_new := &ChunkMetaData{
-								ChunkID:          chunkMeta.ChunkID,
-								URL:              chunkMeta.URL,
-								MD5:              chunkMeta.MD5,
-								CompressedSize:   chunkMeta.CompressedSize,
-								UncompressedSize: chunkMeta.UncompressedSize,
-								IsCompressed:     chunkMeta.IsCompressed,
-								Destinations: []ChunkDestination{
-									{File: dest.File, Offset: offset},
-								},
-							}
-
-							select {
-							case inst.InputQueue <- ChunksInput{Metadata: cm_new}:
-								// Successfully enqueued
-							default:
-								// IMPORTANT: Capture the value, not the reference
-								chunkToEnqueue := cm_new
-								go func() {
-									inst.InputQueue <- ChunksInput{Metadata: chunkToEnqueue}
-								}()
-							}
-
-							inst.Progress.mu.Lock()
-							inst.Progress.TotalBytes += int64(chunkMeta.CompressedSize)
-							inst.Progress.mu.Unlock()
-						}
-						continue
+					if removeErr := os.Remove(stagingPath); removeErr != nil && !os.IsNotExist(removeErr) {
+						logging.GlobalLogger.Warn(fmt.Sprintf("Failed to remove corrupted staging file %s: %v", stagingPath, removeErr))
 					}
 
-					inst.Verifier2.EnqueueVerification(dest.File.FilePath, f, dest.File.MD5, dest.File)
+					for _, chunkID := range fileMeta.Chunks {
+						chunkMeta := inst.ChunkMap[chunkID]
+
+						var offset uint64
+						var found bool
+						for _, d := range chunkMeta.Destinations {
+							if d.File == fileMeta {
+								offset = d.Offset
+								found = true
+								break
+							}
+						}
+						if !found {
+							logging.GlobalLogger.Fatal(fmt.Sprintf("Offset not found for file %s in chunk %s", fileMeta.FilePath, chunkID))
+							return
+						}
+
+						// Create new ChunkMetaData for re-enqueueing (only for this file)
+						cm_new := &ChunkMetaData{
+							ChunkID:          chunkMeta.ChunkID,
+							URL:              chunkMeta.URL,
+							MD5:              chunkMeta.MD5,
+							CompressedSize:   chunkMeta.CompressedSize,
+							UncompressedSize: chunkMeta.UncompressedSize,
+							IsCompressed:     chunkMeta.IsCompressed,
+							Destinations: []ChunkDestination{
+								{File: fileMeta, Offset: offset},
+							},
+						}
+
+						select {
+						case inst.InputQueue <- ChunksInput{Metadata: cm_new}:
+						default:
+							chunkToEnqueue := cm_new
+							go func() {
+								inst.InputQueue <- ChunksInput{Metadata: chunkToEnqueue}
+							}()
+						}
+
+						inst.Progress.mu.Lock()
+						inst.Progress.TotalBytes += int64(chunkMeta.CompressedSize)
+						inst.Progress.mu.Unlock()
+					}
+					continue
 				}
+
+				inst.Verifier2.EnqueueVerification(filePath, f, fileMeta.MD5, fileMeta)
+
+				delete(fileAssembledChunks, filePath)
 			}
 		}
 		logging.GlobalLogger.Info("Assembler output closed, stopping File Verifier")

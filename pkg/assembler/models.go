@@ -14,6 +14,7 @@ type AssemblerInput struct {
 }
 
 type AssemblerOutput struct {
+	FilePath  string
 	ChunkID   string
 	Succeeded bool
 	Payload   any

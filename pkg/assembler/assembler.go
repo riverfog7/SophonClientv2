@@ -40,7 +40,7 @@ func (a *Assembler) Start() {
 				if cerr := input.Content.Close(); cerr != nil {
 					logging.GlobalLogger.Warn(fmt.Sprintf("Failed to close content: %v", cerr))
 				}
-				a.OutputQueue <- AssemblerOutput{ChunkID: input.ChunkID, Succeeded: false, Payload: input.Payload}
+				a.OutputQueue <- AssemblerOutput{FilePath: input.FilePath, ChunkID: input.ChunkID, Succeeded: false, Payload: input.Payload}
 				continue
 			}
 
@@ -50,7 +50,7 @@ func (a *Assembler) Start() {
 				if cerr := input.Content.Close(); cerr != nil {
 					logging.GlobalLogger.Warn(fmt.Sprintf("Failed to close content: %v", cerr))
 				}
-				a.OutputQueue <- AssemblerOutput{ChunkID: input.ChunkID, Succeeded: false, Payload: input.Payload}
+				a.OutputQueue <- AssemblerOutput{FilePath: input.FilePath, ChunkID: input.ChunkID, Succeeded: false, Payload: input.Payload}
 				continue
 			}
 
@@ -62,7 +62,7 @@ func (a *Assembler) Start() {
 				if cerr := input.Content.Close(); cerr != nil {
 					logging.GlobalLogger.Warn(fmt.Sprintf("Failed to close content: %v", cerr))
 				}
-				a.OutputQueue <- AssemblerOutput{ChunkID: input.ChunkID, Succeeded: false, Payload: input.Payload}
+				a.OutputQueue <- AssemblerOutput{FilePath: input.FilePath, ChunkID: input.ChunkID, Succeeded: false, Payload: input.Payload}
 				continue
 			}
 
@@ -76,12 +76,12 @@ func (a *Assembler) Start() {
 
 			if err != nil {
 				logging.GlobalLogger.Error(fmt.Sprintf("Failed to write chunk %s: %v", input.ChunkID, err))
-				a.OutputQueue <- AssemblerOutput{ChunkID: input.ChunkID, Succeeded: false, Payload: input.Payload}
+				a.OutputQueue <- AssemblerOutput{FilePath: input.FilePath, ChunkID: input.ChunkID, Succeeded: false, Payload: input.Payload}
 				continue
 			}
 
 			logging.GlobalLogger.Debug(fmt.Sprintf("Wrote chunk %s to %s at offset %d (%d bytes)", input.ChunkID, input.FilePath, input.Offset, written))
-			a.OutputQueue <- AssemblerOutput{ChunkID: input.ChunkID, Succeeded: true, Payload: input.Payload}
+			a.OutputQueue <- AssemblerOutput{FilePath: input.FilePath, ChunkID: input.ChunkID, Succeeded: true, Payload: input.Payload}
 		}
 	}()
 }
