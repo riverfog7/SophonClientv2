@@ -153,3 +153,47 @@ func hasSubstring(str, substr string) bool {
 	}
 	return false
 }
+
+// ----- functions for locking progress updates -----
+
+func (p *InstallProgress) IncrementDownloadedBytes(n int64) {
+	p.mu.Lock()
+	p.DownloadedBytes += n
+	p.mu.Unlock()
+}
+
+func (p *InstallProgress) IncrementDownloadedChunks() {
+	p.mu.Lock()
+	p.DownloadedChunks++
+	p.mu.Unlock()
+}
+
+func (p *InstallProgress) IncrementTotalBytes(n int64) {
+	p.mu.Lock()
+	p.TotalBytes += n
+	p.mu.Unlock()
+}
+
+func (p *InstallProgress) IncrementDecompressedChunks() {
+	p.mu.Lock()
+	p.DecompressedChunks++
+	p.mu.Unlock()
+}
+
+func (p *InstallProgress) IncrementVerifiedChunks() {
+	p.mu.Lock()
+	p.VerifiedChunks++
+	p.mu.Unlock()
+}
+
+func (p *InstallProgress) IncrementAssembledChunks() {
+	p.mu.Lock()
+	p.AssembledChunks++
+	p.mu.Unlock()
+}
+
+func (p *InstallProgress) IncrementVerifiedFiles() {
+	p.mu.Lock()
+	p.VerifiedFiles++
+	p.mu.Unlock()
+}

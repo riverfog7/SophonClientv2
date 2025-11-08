@@ -67,10 +67,8 @@ func (inst *Installer) DecompressChunks() {
 			if cm.IsCompressed {
 				inst.Decompressor.EnqueueDecompression(downloadOutput.Content, cm)
 
-				inst.Progress.mu.Lock()
-				inst.Progress.DownloadedBytes += int64(cm.CompressedSize)
-				inst.Progress.DownloadedChunks++
-				inst.Progress.mu.Unlock()
+				inst.Progress.IncrementDownloadedChunks()
+				inst.Progress.IncrementDownloadedBytes(int64(cm.CompressedSize))
 			} else {
 				// TODO: Handle uncompressed chunk (passthrough)
 				logging.GlobalLogger.Fatal("Uncompressed chunks are not yet supported")
@@ -96,17 +94,12 @@ func (inst *Installer) VerifyChunks() {
 				utils.NonBlockingEnqueue(inst.InputQueue, ChunksInput{Metadata: cm})
 
 				// Adjust downloaded bytes since we are re-enqueueing
-				inst.Progress.mu.Lock()
-				inst.Progress.TotalBytes += int64(cm.CompressedSize)
-				inst.Progress.mu.Unlock()
+				inst.Progress.IncrementTotalBytes(int64(cm.CompressedSize))
 				continue
 			}
 
 			inst.Verifier.EnqueueVerification(cm.ChunkID, decompressOutput.Content, cm.MD5, cm)
-
-			inst.Progress.mu.Lock()
-			inst.Progress.DecompressedChunks++
-			inst.Progress.mu.Unlock()
+			inst.Progress.IncrementDecompressedChunks()
 		}
 		logging.GlobalLogger.Info("Decompressor output closed, stopping Verifier")
 		inst.Verifier.Stop()
@@ -127,15 +120,10 @@ func (inst *Installer) AssembleChunks() {
 				utils.NonBlockingEnqueue(inst.InputQueue, ChunksInput{Metadata: cm})
 
 				// Adjust downloaded bytes since we are re-enqueueing
-				inst.Progress.mu.Lock()
-				inst.Progress.TotalBytes += int64(cm.CompressedSize)
-				inst.Progress.mu.Unlock()
+				inst.Progress.IncrementTotalBytes(int64(cm.CompressedSize))
 				continue
 			}
-
-			inst.Progress.mu.Lock()
-			inst.Progress.VerifiedChunks++
-			inst.Progress.mu.Unlock()
+			inst.Progress.IncrementVerifiedChunks()
 
 			// This is here because one chunk can be used for multiple files.
 			// And readcloser can only be read once.
@@ -149,9 +137,7 @@ func (inst *Installer) AssembleChunks() {
 				logging.GlobalLogger.Error(fmt.Sprintf("Failed to read verified content for chunk %s: %v, re-enqueueing", cm.ChunkID, err))
 				utils.NonBlockingEnqueue(inst.InputQueue, ChunksInput{Metadata: cm})
 
-				inst.Progress.mu.Lock()
-				inst.Progress.TotalBytes += int64(cm.CompressedSize)
-				inst.Progress.mu.Unlock()
+				inst.Progress.IncrementTotalBytes(int64(cm.CompressedSize))
 				continue
 			}
 
@@ -186,15 +172,10 @@ func (inst *Installer) VerifyFiles() {
 				utils.NonBlockingEnqueue(inst.InputQueue, ChunksInput{Metadata: cm})
 
 				// Adjust downloaded bytes since we are re-enqueueing
-				inst.Progress.mu.Lock()
-				inst.Progress.TotalBytes += int64(cm.CompressedSize)
-				inst.Progress.mu.Unlock()
+				inst.Progress.IncrementTotalBytes(int64(cm.CompressedSize))
 				continue
 			}
-
-			inst.Progress.mu.Lock()
-			inst.Progress.AssembledChunks++
-			inst.Progress.mu.Unlock()
+			inst.Progress.IncrementAssembledChunks()
 
 			if fileAssembledChunks[filePath] == nil {
 				fileAssembledChunks[filePath] = make(map[string]bool)
@@ -277,9 +258,7 @@ func (inst *Installer) VerifyFiles() {
 
 						utils.NonBlockingEnqueue(inst.InputQueue, ChunksInput{Metadata: cm_new})
 
-						inst.Progress.mu.Lock()
-						inst.Progress.TotalBytes += int64(chunkMeta.CompressedSize)
-						inst.Progress.mu.Unlock()
+						inst.Progress.IncrementTotalBytes(int64(chunkMeta.CompressedSize))
 					}
 					continue
 				}
@@ -343,9 +322,7 @@ func (inst *Installer) MoveFiles() {
 
 					utils.NonBlockingEnqueue(inst.InputQueue, ChunksInput{Metadata: new_cm})
 
-					inst.Progress.mu.Lock()
-					inst.Progress.TotalBytes += int64(cm.CompressedSize)
-					inst.Progress.mu.Unlock()
+					inst.Progress.IncrementTotalBytes(int64(cm.CompressedSize))
 				}
 				continue
 			}
@@ -363,8 +340,8 @@ func (inst *Installer) MoveFiles() {
 				return
 			}
 
+			inst.Progress.IncrementVerifiedFiles()
 			inst.Progress.mu.Lock()
-			inst.Progress.VerifiedFiles++
 			verifiedFiles := inst.Progress.VerifiedFiles
 			totalFiles := inst.Progress.TotalFiles
 			inst.Progress.mu.Unlock()
