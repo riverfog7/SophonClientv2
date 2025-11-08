@@ -1,23 +1,25 @@
 package main
 
 import (
-	//"SophonClientv2/internal/logging"
 	"SophonClientv2/pkg/hypAPI"
 	"SophonClientv2/pkg/installer"
 	"SophonClientv2/pkg/operations"
 	"fmt"
+	"testing"
 )
 
 func StructPrettyPrint(data interface{}) {
 	fmt.Printf("%+v\n", data)
 }
 
-func main() {
+func TestHypAPIConfigs(t *testing.T) {
 	StructPrettyPrint(hypAPI.CNGameConfigs)
 	StructPrettyPrint(hypAPI.OSGameConfigs)
 	StructPrettyPrint(hypAPI.CNGameBranches)
 	StructPrettyPrint(hypAPI.OSGameBranches)
+}
 
+func TestFetchCNGameBranches(t *testing.T) {
 	fmt.Println("Fetching CN Game Branches...")
 	for _, gameBranch := range hypAPI.CNGameBranches.Data.GameBranches {
 		mainBranch := gameBranch.Main
@@ -25,10 +27,12 @@ func main() {
 		fmt.Println(url)
 		sophon := hypAPI.GetSophonBuild(url)
 		if sophon.Retcode != 0 {
-			fmt.Printf("Error fetching Sophon build for %s: %s\n", mainBranch.Branch, sophon.Message)
+			t.Logf("Error fetching Sophon build for %s: %s\n", mainBranch.Branch, sophon.Message)
 		}
 	}
+}
 
+func TestFetchOSGameBranches(t *testing.T) {
 	fmt.Println("Fetching OS Game Branches...")
 	for _, gameBranch := range hypAPI.OSGameBranches.Data.GameBranches {
 		mainBranch := gameBranch.Main
@@ -36,54 +40,48 @@ func main() {
 		fmt.Println(url)
 		sophon := hypAPI.GetSophonBuild(url)
 		if sophon.Retcode != 0 {
-			fmt.Printf("Error fetching Sophon build for %s: %s\n", mainBranch.Branch, sophon.Message)
+			t.Logf("Error fetching Sophon build for %s: %s\n", mainBranch.Branch, sophon.Message)
 		}
 	}
+}
 
+func TestParseAllManifests(t *testing.T) {
 	mani, info := operations.GetManifest("hkrpg", "os", "game", "main")
 	inst := installer.NewInstaller(".", ".", 100)
 	_ = inst.ParseManifest(mani, info.ChunkDownload)
+
 	mani, info = operations.GetManifest("hkrpg", "cn", "game", "main")
 	inst = installer.NewInstaller(".", ".", 100)
 	_ = inst.ParseManifest(mani, info.ChunkDownload)
+
 	mani, info = operations.GetManifest("hk4e", "os", "game", "main")
 	inst = installer.NewInstaller(".", ".", 100)
 	_ = inst.ParseManifest(mani, info.ChunkDownload)
+
 	mani, info = operations.GetManifest("hk4e", "cn", "game", "main")
 	inst = installer.NewInstaller(".", ".", 100)
 	_ = inst.ParseManifest(mani, info.ChunkDownload)
+
 	mani, info = operations.GetManifest("bh3", "os", "game", "main")
 	inst = installer.NewInstaller(".", ".", 100)
 	_ = inst.ParseManifest(mani, info.ChunkDownload)
+
 	mani, info = operations.GetManifest("bh3", "cn", "game", "main")
 	inst = installer.NewInstaller(".", ".", 100)
 	_ = inst.ParseManifest(mani, info.ChunkDownload)
+
 	mani, info = operations.GetManifest("nap", "os", "game", "main")
 	inst = installer.NewInstaller(".", ".", 100)
 	_ = inst.ParseManifest(mani, info.ChunkDownload)
+
 	mani, info = operations.GetManifest("nap", "cn", "game", "main")
 	inst = installer.NewInstaller(".", ".", 100)
 	_ = inst.ParseManifest(mani, info.ChunkDownload)
+}
 
-	//logging.GlobalLogger.Warn("Testing with real game files")
-	//installer = operations.NewInstaller("/Volumes/SSD/Games/Genshin Impact game1", "/Volumes/SSD/Games/Genshin Impact game1/.cache")
-	//mani, info = operations.GetManifest("hk4e", "os", "game", "main")
-	//_ = installer.ParseManifest(mani, info.ChunkDownload)
-	//_ = installer.Prepare()
-	//installer.Start()
-	//installer.Wait()
-	//installer.Stop()
-
-	//mani, info = operations.GetManifest("hk4e", "os", "ko-kr", "main")
-	//// same dir (audiopack test)
-	//installer = operations.NewInstaller("/Volumes/SSD/Games/Genshin Impact game1", "/Volumes/SSD/Games/Genshin Impact game1/.cache")
-	//_ = installer.ParseManifest(mani, info.ChunkDownload)
-	//_ = installer.Prepare()
-	//installer.Start()
-	//installer.Wait()
-
-	mani, info = operations.GetManifest("hk4e", "os", "game", "main")
-	inst = installer.NewInstaller("/Volumes/SSD/Games/Genshin Impact game1", "/Volumes/SSD/Games/Genshin Impact game1/.cache", 50)
+func TestFullInstallation(t *testing.T) {
+	mani, info := operations.GetManifest("hk4e", "os", "game", "main")
+	inst := installer.NewInstaller("/Volumes/SSD/Games/Genshin Impact game1", "/Volumes/SSD/Games/Genshin Impact game1/.cache", 50)
 	_ = inst.ParseManifest(mani, info.ChunkDownload)
 	_ = inst.Prepare()
 	inst.Start()
