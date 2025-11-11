@@ -5,6 +5,9 @@ import (
 	"SophonClientv2/pkg/installer"
 	"SophonClientv2/pkg/operations"
 	"fmt"
+	"log"
+	"os"
+	"runtime/pprof"
 	"testing"
 )
 
@@ -80,6 +83,22 @@ func TestParseAllManifests(t *testing.T) {
 }
 
 func TestFullInstallation(t *testing.T) {
+	f_c, err := os.Create("cpu.prof")
+	if err != nil {
+		t.Fatalf("Could not create CPU profile: %v", err)
+	}
+	f_m, err := os.Create("mem.prof")
+	if err != nil {
+		t.Fatalf("Could not create memory profile: %v", err)
+	}
+	defer f_c.Close()
+	defer f_m.Close()
+
+	if err := pprof.StartCPUProfile(f_c); err != nil {
+		log.Fatal("could not start CPU profile: ", err)
+	}
+	defer pprof.StopCPUProfile()
+
 	mani, info := operations.GetManifest("hk4e", "os", "game", "main")
 	inst := installer.NewInstaller("/Volumes/SSD/Games/Genshin Impact game1", "/Volumes/SSD/Games/Genshin Impact game1/.cache", 50)
 	_ = inst.ParseManifest(mani, info.ChunkDownload)
@@ -87,4 +106,8 @@ func TestFullInstallation(t *testing.T) {
 	inst.Start()
 	inst.Wait()
 	inst.Stop()
+
+	if err := pprof.Lookup("heap").WriteTo(f_m, 0); err != nil {
+		log.Fatal("could not write memory profile: ", err)
+	}
 }

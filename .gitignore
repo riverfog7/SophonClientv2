@@ -194,3 +194,4 @@ Temporary Items
 *.pb.go
 
 internal/secrets/secrets.go
+*.prof
