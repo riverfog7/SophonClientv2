@@ -21,8 +21,8 @@ func NewInstaller(gameDir, stagingDir string, queueSize int) *Installer {
 
 		Downloader:   downloader.NewDownloader(config.Config.DownloadChanSize),
 		Decompressor: decompressor.NewDecompressor(config.Config.DecompressChanSize),
-		Verifier:     verifier.NewVerifier(config.Config.VerifyChanSize),
+		Verifier:     verifier.NewVerifier(config.Config.VerifyChanSize, true),
 		Assembler:    assembler.NewAssembler(stagingDir, queueSize),
-		Verifier2:    verifier.NewVerifier(config.Config.VerifyChanSize),
+		Verifier2:    verifier.NewVerifier(config.Config.VerifyChanSize, false),
 	}
 }

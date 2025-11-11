@@ -19,16 +19,18 @@ type VerifierOutput struct {
 }
 
 type VerifierWorker struct {
-	Id          int
-	InputQueue  chan VerifierInput
-	OutputQueue chan VerifierOutput
-	wg          *sync.WaitGroup
+	Id            int
+	ReturnContent bool
+	InputQueue    chan VerifierInput
+	OutputQueue   chan VerifierOutput
+	wg            *sync.WaitGroup
 }
 
 type Verifier struct {
-	ThreadCount int
-	InputQueue  chan VerifierInput
-	OutputQueue chan VerifierOutput
-	Workers     []*VerifierWorker
-	wg          *sync.WaitGroup
+	ReturnContent bool
+	ThreadCount   int
+	InputQueue    chan VerifierInput
+	OutputQueue   chan VerifierOutput
+	Workers       []*VerifierWorker
+	wg            *sync.WaitGroup
 }

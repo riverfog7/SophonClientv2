@@ -12,12 +12,13 @@ import (
 	"sync"
 )
 
-func NewWorker(id int, inputQueue chan VerifierInput, outputQueue chan VerifierOutput, wg *sync.WaitGroup) *VerifierWorker {
+func NewWorker(id int, inputQueue chan VerifierInput, outputQueue chan VerifierOutput, wg *sync.WaitGroup, returnContent bool) *VerifierWorker {
 	return &VerifierWorker{
-		Id:          id,
-		InputQueue:  inputQueue,
-		OutputQueue: outputQueue,
-		wg:          wg,
+		Id:            id,
+		ReturnContent: returnContent,
+		InputQueue:    inputQueue,
+		OutputQueue:   outputQueue,
+		wg:            wg,
 	}
 }
 
@@ -29,37 +30,64 @@ func (worker *VerifierWorker) Start() {
 		defer worker.wg.Done()
 		for input := range worker.InputQueue {
 			// Streaming MD5 computation
-			var buf bytes.Buffer
 			hash := md5.New()
-			teeReader := io.TeeReader(input.Content, &buf) // for passing content (no consume content)
-			if _, err := io.Copy(hash, teeReader); err != nil {
-				if cerr := input.Content.Close(); cerr != nil {
-					logging.GlobalLogger.Error("Worker " + strconv.Itoa(worker.Id) + ": Error closing content after read failure: " + cerr.Error())
+			if worker.ReturnContent {
+				var buf bytes.Buffer
+				teeReader := io.TeeReader(input.Content, &buf) // for passing content (no consume content)
+				if _, err := io.Copy(hash, teeReader); err != nil {
+					if cerr := input.Content.Close(); cerr != nil {
+						logging.GlobalLogger.Error("Worker " + strconv.Itoa(worker.Id) + ": Error closing content after read failure: " + cerr.Error())
+					}
+					logging.GlobalLogger.Error("Worker " + strconv.Itoa(worker.Id) + ": Failed to read content: " + err.Error() + " for " + input.Name)
+					logging.GlobalLogger.Error("Worker " + strconv.Itoa(worker.Id) + ": Marking verification as failed for " + input.Name)
+					worker.OutputQueue <- VerifierOutput{Content: nil, Suceeded: false, Payload: input.Payload}
+					continue
 				}
-				logging.GlobalLogger.Error("Worker " + strconv.Itoa(worker.Id) + ": Failed to read content: " + err.Error() + " for " + input.Name)
-				logging.GlobalLogger.Error("Worker " + strconv.Itoa(worker.Id) + ": Marking verification as failed for " + input.Name)
-				worker.OutputQueue <- VerifierOutput{Content: nil, Suceeded: false, Payload: input.Payload}
-				continue
-			}
-			if cerr := input.Content.Close(); cerr != nil {
-				logging.GlobalLogger.Error("Worker " + strconv.Itoa(worker.Id) + ": Error closing content after successful read: " + cerr.Error())
-			}
+				if cerr := input.Content.Close(); cerr != nil {
+					logging.GlobalLogger.Error("Worker " + strconv.Itoa(worker.Id) + ": Error closing content after successful read: " + cerr.Error())
+				}
 
-			computedHex := hex.EncodeToString(hash.Sum(nil))
+				computedHex := hex.EncodeToString(hash.Sum(nil))
 
-			if computedHex != input.ExpectedMD5 {
-				logging.GlobalLogger.Warn("Worker " + strconv.Itoa(worker.Id) + ": MD5 mismatch - expected " + input.ExpectedMD5 + ", got " + computedHex + " for " + input.Name)
-				worker.OutputQueue <- VerifierOutput{Content: nil, Suceeded: false, Payload: input.Payload}
-				continue
+				if computedHex != input.ExpectedMD5 {
+					logging.GlobalLogger.Warn("Worker " + strconv.Itoa(worker.Id) + ": MD5 mismatch - expected " + input.ExpectedMD5 + ", got " + computedHex + " for " + input.Name)
+					worker.OutputQueue <- VerifierOutput{Content: nil, Suceeded: false, Payload: input.Payload}
+					continue
+				}
+
+				logging.GlobalLogger.Debug("Worker " + strconv.Itoa(worker.Id) + ": MD5 verified successfully for " + input.Name)
+				worker.OutputQueue <- VerifierOutput{Content: io.NopCloser(bytes.NewReader(buf.Bytes())), Suceeded: true, Payload: input.Payload}
+			} else {
+				// No copying content to memory (stream to hash)
+				if _, err := io.Copy(hash, input.Content); err != nil {
+					if cerr := input.Content.Close(); cerr != nil {
+						logging.GlobalLogger.Error("Worker " + strconv.Itoa(worker.Id) + ": Error closing content after read failure: " + cerr.Error())
+					}
+					logging.GlobalLogger.Error("Worker " + strconv.Itoa(worker.Id) + ": Failed to read content: " + err.Error() + " for " + input.Name)
+					logging.GlobalLogger.Error("Worker " + strconv.Itoa(worker.Id) + ": Marking verification as failed for " + input.Name)
+					worker.OutputQueue <- VerifierOutput{Content: nil, Suceeded: false, Payload: input.Payload}
+					continue
+				}
+				if cerr := input.Content.Close(); cerr != nil {
+					logging.GlobalLogger.Error("Worker " + strconv.Itoa(worker.Id) + ": Error closing content after successful read: " + cerr.Error())
+				}
+
+				computedHex := hex.EncodeToString(hash.Sum(nil))
+
+				if computedHex != input.ExpectedMD5 {
+					logging.GlobalLogger.Warn("Worker " + strconv.Itoa(worker.Id) + ": MD5 mismatch - expected " + input.ExpectedMD5 + ", got " + computedHex + " for " + input.Name)
+					worker.OutputQueue <- VerifierOutput{Content: nil, Suceeded: false, Payload: input.Payload}
+					continue
+				}
+
+				logging.GlobalLogger.Debug("Worker " + strconv.Itoa(worker.Id) + ": MD5 verified successfully for " + input.Name)
+				worker.OutputQueue <- VerifierOutput{Content: nil, Suceeded: true, Payload: input.Payload}
 			}
-
-			logging.GlobalLogger.Debug("Worker " + strconv.Itoa(worker.Id) + ": MD5 verified successfully for " + input.Name)
-			worker.OutputQueue <- VerifierOutput{Content: io.NopCloser(bytes.NewReader(buf.Bytes())), Suceeded: true, Payload: input.Payload}
 		}
 	}()
 }
 
-func NewVerifier(buffSize int) *Verifier {
+func NewVerifier(buffSize int, returnContent bool) *Verifier {
 	logging.GlobalLogger.Info("Initializing Verifier with " + strconv.Itoa(config.Config.CocurrentDownloads) + " workers")
 
 	threadCount := config.Config.CocurrentDownloads
@@ -69,16 +97,17 @@ func NewVerifier(buffSize int) *Verifier {
 	wg := &sync.WaitGroup{}
 
 	for i := 0; i < threadCount; i++ {
-		workers[i] = NewWorker(i, inputQueue, outputQueue, wg)
+		workers[i] = NewWorker(i, inputQueue, outputQueue, wg, returnContent)
 		workers[i].Start()
 	}
 
 	return &Verifier{
-		ThreadCount: threadCount,
-		InputQueue:  inputQueue,
-		OutputQueue: outputQueue,
-		Workers:     workers,
-		wg:          wg,
+		ThreadCount:   threadCount,
+		ReturnContent: returnContent,
+		InputQueue:    inputQueue,
+		OutputQueue:   outputQueue,
+		Workers:       workers,
+		wg:            wg,
 	}
 }
 

@@ -20,7 +20,7 @@ func (inst *Installer) Prepare() error {
 
 	// Set up verifier and enqueue existing files
 	// Queue size should be enough to hold all files (No subscriber for output yet)
-	ver := verifier.NewVerifier(len(inst.FileMap) + 10)
+	ver := verifier.NewVerifier(len(inst.FileMap)+10, false)
 	jobs := 0
 	for filePath, fm := range inst.FileMap {
 		absPath := filepath.Join(inst.GameDir, filePath)
