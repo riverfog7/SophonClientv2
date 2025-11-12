@@ -37,9 +37,7 @@ func (a *Assembler) Start() {
 			dir := filepath.Dir(fullPath)
 			if err := os.MkdirAll(dir, 0o755); err != nil {
 				logging.GlobalLogger.Error(fmt.Sprintf("Failed to create directory %s: %v", dir, err))
-				if cerr := input.Content.Close(); cerr != nil {
-					logging.GlobalLogger.Warn(fmt.Sprintf("Failed to close content: %v", cerr))
-				}
+				utils.CloseStreamSafe(input.Content)
 				a.OutputQueue <- AssemblerOutput{FilePath: input.FilePath, ChunkID: input.ChunkID, Succeeded: false, Payload: input.Payload}
 				continue
 			}
@@ -47,32 +45,22 @@ func (a *Assembler) Start() {
 			file, err := os.OpenFile(fullPath, os.O_CREATE|os.O_WRONLY, 0o644)
 			if err != nil {
 				logging.GlobalLogger.Error(fmt.Sprintf("Failed to open file %s: %v", fullPath, err))
-				if cerr := input.Content.Close(); cerr != nil {
-					logging.GlobalLogger.Warn(fmt.Sprintf("Failed to close content: %v", cerr))
-				}
+				utils.CloseStreamSafe(input.Content)
 				a.OutputQueue <- AssemblerOutput{FilePath: input.FilePath, ChunkID: input.ChunkID, Succeeded: false, Payload: input.Payload}
 				continue
 			}
 
 			if _, err := file.Seek(int64(input.Offset), io.SeekStart); err != nil {
 				logging.GlobalLogger.Error(fmt.Sprintf("Failed to seek to offset %d: %v", input.Offset, err))
-				if cerr := file.Close(); cerr != nil {
-					logging.GlobalLogger.Warn(fmt.Sprintf("Failed to close file: %v", cerr))
-				}
-				if cerr := input.Content.Close(); cerr != nil {
-					logging.GlobalLogger.Warn(fmt.Sprintf("Failed to close content: %v", cerr))
-				}
+				utils.CloseStreamSafe(file)
+				utils.CloseStreamSafe(input.Content)
 				a.OutputQueue <- AssemblerOutput{FilePath: input.FilePath, ChunkID: input.ChunkID, Succeeded: false, Payload: input.Payload}
 				continue
 			}
 
 			written, err := io.Copy(file, input.Content)
-			if cerr := file.Close(); cerr != nil {
-				logging.GlobalLogger.Warn(fmt.Sprintf("Failed to close file: %v", cerr))
-			}
-			if cerr := input.Content.Close(); cerr != nil {
-				logging.GlobalLogger.Warn(fmt.Sprintf("Failed to close content: %v", cerr))
-			}
+			utils.CloseStreamSafe(file)
+			utils.CloseStreamSafe(input.Content)
 
 			if err != nil {
 				logging.GlobalLogger.Error(fmt.Sprintf("Failed to write chunk %s: %v", input.ChunkID, err))

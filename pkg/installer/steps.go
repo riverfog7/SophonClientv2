@@ -60,6 +60,7 @@ func (inst *Installer) DecompressChunks() {
 
 			if !downloadOutput.Suceeded {
 				logging.GlobalLogger.Warn(fmt.Sprintf("Download failed for chunk %s, re-enqueueing", cm.ChunkID))
+				utils.CloseStreamSafe(downloadOutput.Content)
 				utils.NonBlockingEnqueue(inst.InputQueue, ChunksInput{Metadata: cm})
 				continue
 			}
@@ -91,6 +92,7 @@ func (inst *Installer) VerifyChunks() {
 
 			if !decompressOutput.Suceeded {
 				logging.GlobalLogger.Warn(fmt.Sprintf("Decompression failed for chunk %s, re-enqueueing", cm.ChunkID))
+				utils.CloseStreamSafe(decompressOutput.Content)
 				utils.NonBlockingEnqueue(inst.InputQueue, ChunksInput{Metadata: cm})
 
 				// Adjust downloaded bytes since we are re-enqueueing
@@ -117,6 +119,7 @@ func (inst *Installer) AssembleChunks() {
 
 			if !verifyOutput.Suceeded {
 				logging.GlobalLogger.Warn(fmt.Sprintf("Verification failed for chunk %s, re-enqueueing", cm.ChunkID))
+				utils.CloseStreamSafe(verifyOutput.Content)
 				utils.NonBlockingEnqueue(inst.InputQueue, ChunksInput{Metadata: cm})
 
 				// Adjust downloaded bytes since we are re-enqueueing
@@ -129,12 +132,11 @@ func (inst *Installer) AssembleChunks() {
 			// And readcloser can only be read once.
 			// Read content into memory once for reuse across multiple destinations
 			contentBytes, err := io.ReadAll(verifyOutput.Content)
-			if cerr := verifyOutput.Content.Close(); cerr != nil {
-				logging.GlobalLogger.Warn(fmt.Sprintf("Failed to close verified content stream for chunk %s: %v", cm.ChunkID, cerr))
-			}
+			utils.CloseStreamSafe(verifyOutput.Content)
 
 			if err != nil {
 				logging.GlobalLogger.Error(fmt.Sprintf("Failed to read verified content for chunk %s: %v, re-enqueueing", cm.ChunkID, err))
+				contentBytes = nil // Content is already closed by readAll or closeStreamSafe
 				utils.NonBlockingEnqueue(inst.InputQueue, ChunksInput{Metadata: cm})
 
 				inst.Progress.IncrementTotalBytes(int64(cm.CompressedSize))
