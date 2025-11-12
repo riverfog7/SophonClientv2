@@ -4,6 +4,7 @@ import (
 	"SophonClientv2/internal/config"
 	"SophonClientv2/internal/logging"
 	"SophonClientv2/pkg/utils"
+	"bytes"
 	"io"
 	"net/http"
 	"strconv"
@@ -35,7 +36,16 @@ func (worker *DownloaderWorker) Start() {
 				resp, err = worker.HttpClient.Get(input.Url)
 				if err == nil && resp.StatusCode == http.StatusOK {
 					logging.GlobalLogger.Debug("Worker " + strconv.Itoa(worker.Id) + ": Successfully downloaded chunk from " + input.Url)
-					worker.OutputQueue <- DownloaderOutput{Content: resp.Body, Suceeded: true, Payload: input.Payload}
+					var contentBytes []byte
+					contentBytes, err = io.ReadAll(resp.Body)
+					utils.CloseStreamSafe(resp.Body)
+					if err != nil {
+						logging.GlobalLogger.Error("Worker " + strconv.Itoa(worker.Id) + ": Error reading response body from " + input.Url + ": " + err.Error())
+						contentBytes = nil
+						continue
+					}
+
+					worker.OutputQueue <- DownloaderOutput{Content: io.NopCloser(bytes.NewReader(contentBytes)), Suceeded: true, Payload: input.Payload}
 					break
 				}
 				if attempt < maxRetries {
@@ -45,8 +55,7 @@ func (worker *DownloaderWorker) Start() {
 
 				// Cleanup on final failure
 				if resp != nil && resp.Body != nil {
-					io.Copy(io.Discard, resp.Body)
-					resp.Body.Close()
+					utils.CloseStreamSafe(resp.Body)
 				}
 				if err != nil {
 					logging.GlobalLogger.Error("Worker " + strconv.Itoa(worker.Id) + ": Failed to download chunk from " + input.Url + ": " + err.Error())
