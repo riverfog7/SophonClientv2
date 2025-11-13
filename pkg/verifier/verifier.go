@@ -10,6 +10,7 @@ import (
 	"io"
 	"strconv"
 	"sync"
+	"time"
 )
 
 func NewWorker(id int, inputQueue chan VerifierInput, outputQueue chan VerifierOutput, wg *sync.WaitGroup, returnContent bool) *VerifierWorker {
@@ -101,7 +102,7 @@ func NewVerifier(buffSize int, returnContent bool) *Verifier {
 		workers[i].Start()
 	}
 
-	return &Verifier{
+	verifier := &Verifier{
 		ThreadCount:   threadCount,
 		ReturnContent: returnContent,
 		InputQueue:    inputQueue,
@@ -109,11 +110,31 @@ func NewVerifier(buffSize int, returnContent bool) *Verifier {
 		Workers:       workers,
 		wg:            wg,
 	}
+	verifier.StartPrintChannelStatus(config.Config.QueueLengthPrintInterval)
+	return verifier
+}
+
+func (v *Verifier) StartPrintChannelStatus(intervalSeconds int) {
+	go func() {
+		for {
+			if v.wg == nil {
+				return
+			}
+			v.PrintChannelStatus()
+			<-time.After(time.Duration(intervalSeconds) * time.Second)
+		}
+	}()
+}
+
+func (v *Verifier) PrintChannelStatus() {
+	logging.GlobalLogger.Debug("Verifier Input Queue Length: " + strconv.Itoa(len(v.InputQueue)) + "/" + strconv.Itoa(cap(v.InputQueue)))
+	logging.GlobalLogger.Debug("Verifier Output Queue Length: " + strconv.Itoa(len(v.OutputQueue)) + "/" + strconv.Itoa(cap(v.OutputQueue)))
 }
 
 func (v *Verifier) Stop() {
 	close(v.InputQueue)
 	v.wg.Wait()
+	v.wg = nil
 	close(v.OutputQueue)
 	logging.GlobalLogger.Info("Verifier stopped")
 }

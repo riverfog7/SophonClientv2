@@ -27,6 +27,8 @@ type SophonClientConfig struct {
 	CocurrentDecompressions int
 	CocurrentHashchecks     int
 
+	QueueLengthPrintInterval int
+
 	SophonLogLevel  LogLevel
 	SophonLogFile   string
 	SophonLogToFile bool
@@ -44,6 +46,8 @@ func NewSophonClientConfig() SophonClientConfig {
 		CocurrentDownloads:      16,
 		CocurrentDecompressions: 4,
 		CocurrentHashchecks:     8,
+
+		QueueLengthPrintInterval: 1,
 
 		SophonLogLevel:  Debug,
 		SophonLogFile:   "",

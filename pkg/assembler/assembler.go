@@ -1,13 +1,16 @@
 package assembler
 
 import (
+	"SophonClientv2/internal/config"
 	"SophonClientv2/internal/logging"
 	"SophonClientv2/pkg/utils"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"sync"
+	"time"
 )
 
 func NewAssembler(stagingDir string, buffSize int) *Assembler {
@@ -23,8 +26,26 @@ func NewAssembler(stagingDir string, buffSize int) *Assembler {
 	}
 
 	asm.Start() // Not multi threaded
+	asm.StartPrintChannelStatus(config.Config.QueueLengthPrintInterval)
 
 	return asm
+}
+
+func (a *Assembler) StartPrintChannelStatus(intervalSeconds int) {
+	go func() {
+		for {
+			if a.wg == nil {
+				return
+			}
+			a.PrintChannelStatus()
+			<-time.After(time.Duration(intervalSeconds) * time.Second)
+		}
+	}()
+}
+
+func (a *Assembler) PrintChannelStatus() {
+	logging.GlobalLogger.Debug("Assembler Input Queue Length: " + strconv.Itoa(len(a.InputQueue)) + "/" + strconv.Itoa(cap(a.InputQueue)))
+	logging.GlobalLogger.Debug("Assembler Output Queue Length: " + strconv.Itoa(len(a.OutputQueue)) + "/" + strconv.Itoa(cap(a.OutputQueue)))
 }
 
 func (a *Assembler) Start() {
@@ -77,7 +98,9 @@ func (a *Assembler) Start() {
 func (a *Assembler) Stop() {
 	close(a.InputQueue)
 	a.wg.Wait()
+	a.wg = nil
 	close(a.OutputQueue)
+	logging.GlobalLogger.Info("Assembler stopped")
 }
 
 func (a *Assembler) EnqueueWrite(filePath string, offset uint64, chunkID string, content io.ReadCloser, payload any) {

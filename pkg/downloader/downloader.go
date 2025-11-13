@@ -96,7 +96,7 @@ func NewDownloader(buffSize int) *Downloader {
 		workers[i].Start()
 	}
 
-	return &Downloader{
+	downloader := &Downloader{
 		ThreadCount: threadCount,
 		HttpClient:  httpClient,
 		InputQueue:  inputQueue,
@@ -104,11 +104,31 @@ func NewDownloader(buffSize int) *Downloader {
 		Workers:     workers,
 		wg:          wg,
 	}
+	downloader.StartPrintChannelStatus(config.Config.QueueLengthPrintInterval)
+	return downloader
+}
+
+func (d *Downloader) StartPrintChannelStatus(intervalSeconds int) {
+	go func() {
+		for {
+			if d.wg == nil {
+				return
+			}
+			d.PrintChannelStatus()
+			<-time.After(time.Duration(intervalSeconds) * time.Second)
+		}
+	}()
+}
+
+func (d *Downloader) PrintChannelStatus() {
+	logging.GlobalLogger.Debug("Downloader InputQueue: " + strconv.Itoa(len(d.InputQueue)) + "/" + strconv.Itoa(cap(d.InputQueue)))
+	logging.GlobalLogger.Debug("Downloader OutputQueue: " + strconv.Itoa(len(d.OutputQueue)) + "/" + strconv.Itoa(cap(d.OutputQueue)))
 }
 
 func (d *Downloader) Stop() {
 	close(d.InputQueue)
 	d.wg.Wait()
+	d.wg = nil
 	close(d.OutputQueue)
 	logging.GlobalLogger.Info("Downloader stopped")
 }

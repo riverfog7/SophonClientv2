@@ -7,6 +7,7 @@ import (
 	"io"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/klauspost/compress/zstd"
 )
@@ -60,18 +61,38 @@ func NewDecompressor(buffSize int) *Decompressor {
 		workers[i].Start()
 	}
 
-	return &Decompressor{
+	decompressor := &Decompressor{
 		ThreadCount: threadCount,
 		InputQueue:  inputQueue,
 		OutputQueue: outputQueue,
 		Workers:     workers,
 		wg:          wg,
 	}
+	decompressor.StartPrintChannelStatus(config.Config.QueueLengthPrintInterval)
+	return decompressor
+}
+
+func (d *Decompressor) StartPrintChannelStatus(intervalSeconds int) {
+	go func() {
+		for {
+			if d.wg == nil {
+				return
+			}
+			d.PrintChannelStatus()
+			<-time.After(time.Duration(intervalSeconds) * time.Second)
+		}
+	}()
+}
+
+func (d *Decompressor) PrintChannelStatus() {
+	logging.GlobalLogger.Debug("Decompressor Input Queue Length: " + strconv.Itoa(len(d.InputQueue)) + "/" + strconv.Itoa(cap(d.InputQueue)))
+	logging.GlobalLogger.Debug("Decompressor Output Queue Length: " + strconv.Itoa(len(d.OutputQueue)) + "/" + strconv.Itoa(cap(d.OutputQueue)))
 }
 
 func (d *Decompressor) Stop() {
 	close(d.InputQueue)
 	d.wg.Wait()
+	d.wg = nil
 	close(d.OutputQueue)
 	logging.GlobalLogger.Info("Decompressor stopped")
 }
