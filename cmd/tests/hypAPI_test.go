@@ -49,35 +49,35 @@ func TestFetchOSGameBranches(t *testing.T) {
 }
 
 func TestParseAllManifests(t *testing.T) {
-	mani, info := operations.GetManifest("hkrpg", "os", "game", "main")
+	mani, info := operations.GetAndParseManifest("hkrpg", "os", "game", "main")
 	inst := installer.NewInstaller(".", ".", 100)
 	_ = inst.ParseManifest(mani, info.ChunkDownload)
 
-	mani, info = operations.GetManifest("hkrpg", "cn", "game", "main")
+	mani, info = operations.GetAndParseManifest("hkrpg", "cn", "game", "main")
 	inst = installer.NewInstaller(".", ".", 100)
 	_ = inst.ParseManifest(mani, info.ChunkDownload)
 
-	mani, info = operations.GetManifest("hk4e", "os", "game", "main")
+	mani, info = operations.GetAndParseManifest("hk4e", "os", "game", "main")
 	inst = installer.NewInstaller(".", ".", 100)
 	_ = inst.ParseManifest(mani, info.ChunkDownload)
 
-	mani, info = operations.GetManifest("hk4e", "cn", "game", "main")
+	mani, info = operations.GetAndParseManifest("hk4e", "cn", "game", "main")
 	inst = installer.NewInstaller(".", ".", 100)
 	_ = inst.ParseManifest(mani, info.ChunkDownload)
 
-	mani, info = operations.GetManifest("bh3", "os", "game", "main")
+	mani, info = operations.GetAndParseManifest("bh3", "os", "game", "main")
 	inst = installer.NewInstaller(".", ".", 100)
 	_ = inst.ParseManifest(mani, info.ChunkDownload)
 
-	mani, info = operations.GetManifest("bh3", "cn", "game", "main")
+	mani, info = operations.GetAndParseManifest("bh3", "cn", "game", "main")
 	inst = installer.NewInstaller(".", ".", 100)
 	_ = inst.ParseManifest(mani, info.ChunkDownload)
 
-	mani, info = operations.GetManifest("nap", "os", "game", "main")
+	mani, info = operations.GetAndParseManifest("nap", "os", "game", "main")
 	inst = installer.NewInstaller(".", ".", 100)
 	_ = inst.ParseManifest(mani, info.ChunkDownload)
 
-	mani, info = operations.GetManifest("nap", "cn", "game", "main")
+	mani, info = operations.GetAndParseManifest("nap", "cn", "game", "main")
 	inst = installer.NewInstaller(".", ".", 100)
 	_ = inst.ParseManifest(mani, info.ChunkDownload)
 }
@@ -99,7 +99,7 @@ func TestFullInstallation(t *testing.T) {
 	}
 	defer pprof.StopCPUProfile()
 
-	mani, info := operations.GetManifest("hk4e", "os", "game", "main")
+	mani, info := operations.GetAndParseManifest("hk4e", "os", "game", "main")
 	inst := installer.NewInstaller("/Volumes/SSD/Games/Genshin Impact game1", "/Volumes/SSD/Games/Genshin Impact game1/.cache", 50)
 	_ = inst.ParseManifest(mani, info.ChunkDownload)
 	_ = inst.Prepare()

@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-func GetManifest(gameType string, relType string, matchingField string, branch string) (*models.Manifest, *models.SophonManifest) {
+func GetAndParseManifest(gameType string, relType string, matchingField string, branch string) (*models.Manifest, *models.SophonManifest) {
 	var biz string
 	var hypGames []models.HYPGame
 	switch strings.ToLower(relType) {
