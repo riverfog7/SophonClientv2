@@ -48,6 +48,32 @@ func TestFetchOSGameBranches(t *testing.T) {
 	}
 }
 
+func TestFetchCNGamePatchBuilds(t *testing.T) {
+	fmt.Println("Fetching CN Game Patch Builds...")
+	for _, gameBranch := range hypAPI.CNGameBranches.Data.GameBranches {
+		mainBranch := gameBranch.Main
+		url := hypAPI.PatchSophonGetBuildURL("cn", mainBranch)
+		fmt.Println(url)
+		sophon := hypAPI.GetSophonPatchBuild(url)
+		if sophon.Retcode != 0 {
+			t.Logf("Error fetching Sophon patch build for %s: %s\n", mainBranch.Branch, sophon.Message)
+		}
+	}
+}
+
+func TestFetchOSGamePatchBuilds(t *testing.T) {
+	fmt.Println("Fetching OS Game Patch Builds...")
+	for _, gameBranch := range hypAPI.OSGameBranches.Data.GameBranches {
+		mainBranch := gameBranch.Main
+		url := hypAPI.PatchSophonGetBuildURL("os", mainBranch)
+		fmt.Println(url)
+		sophon := hypAPI.GetSophonPatchBuild(url)
+		if sophon.Retcode != 0 {
+			t.Logf("Error fetching Sophon patch build for %s: %s\n", mainBranch.Branch, sophon.Message)
+		}
+	}
+}
+
 func TestParseAllManifests(t *testing.T) {
 	mani, info := operations.GetAndParseManifest("hkrpg", "os", "game", "main")
 	inst := installer.NewInstaller(".", ".", 100)
