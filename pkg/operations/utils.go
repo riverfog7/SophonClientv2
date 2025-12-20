@@ -49,7 +49,9 @@ func GetAndParseManifest(gameType string, relType string, matchingField string, 
 	if sophonBuild.Retcode != 0 {
 		logging.GlobalLogger.Fatal("Failed to fetch Sophon build for branch " + selectedGame.Main.Branch + ": " + sophonBuild.Message)
 	}
-
+	for _, manifestInfo := range sophonBuild.Data.Manifests {
+		logging.GlobalLogger.Info("Matching field " + manifestInfo.MatchingField + " found for game " + gameType + "_" + relType + " on branch " + branch)
+	}
 	for _, manifestInfo := range sophonBuild.Data.Manifests {
 		if manifestInfo.MatchingField == matchingField {
 			mani := manifest.GetManifest(manifestInfo)
