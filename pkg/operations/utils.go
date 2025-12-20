@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-func GetAndParseManifest(gameType string, relType string, matchingField string, branch string) (*models.Manifest, *models.SophonManifest) {
+func getGameBranch(gameType string, relType string, branch string) models.HYPGameBranch {
 	var biz string
 	var hypGames []models.HYPGame
 	switch strings.ToLower(relType) {
@@ -45,9 +45,14 @@ func GetAndParseManifest(gameType string, relType string, matchingField string, 
 		targetBranch = selectedGame.Main
 	}
 
+	return targetBranch
+}
+
+func GetAndParseManifest(gameType string, relType string, matchingField string, branch string) (*models.Manifest, *models.SophonManifest) {
+	targetBranch := getGameBranch(gameType, relType, branch)
 	sophonBuild := hypAPI.GetSophonBuildByBranch(relType, targetBranch)
 	if sophonBuild.Retcode != 0 {
-		logging.GlobalLogger.Fatal("Failed to fetch Sophon build for branch " + selectedGame.Main.Branch + ": " + sophonBuild.Message)
+		logging.GlobalLogger.Fatal("Failed to fetch Sophon build for branch " + targetBranch.Branch + ": " + sophonBuild.Message)
 	}
 	for _, manifestInfo := range sophonBuild.Data.Manifests {
 		logging.GlobalLogger.Info("Matching field " + manifestInfo.MatchingField + " found for game " + gameType + "_" + relType + " on branch " + branch)
@@ -63,5 +68,28 @@ func GetAndParseManifest(gameType string, relType string, matchingField string, 
 	}
 
 	logging.GlobalLogger.Fatal("Failed to find matching manifest with field: " + matchingField)
+	return nil, nil
+}
+
+func GetAndParsePatchManifest(gameType string, relType string, matchingField string, branch string) (*models.DiffManifest, *models.SophonPatchManifest) {
+	targetBranch := getGameBranch(gameType, relType, branch)
+	sophonPatchBuild := hypAPI.GetSophonPatchBuildByBranch(relType, targetBranch)
+	if sophonPatchBuild.Retcode != 0 {
+		logging.GlobalLogger.Fatal("Failed to fetch Sophon patch build for branch " + targetBranch.Branch + ": " + sophonPatchBuild.Message)
+	}
+	for _, manifestInfo := range sophonPatchBuild.Data.Manifests {
+		logging.GlobalLogger.Info("Matching field " + manifestInfo.MatchingField + " found for game " + gameType + "_" + relType + " on branch " + branch)
+	}
+	for _, manifestInfo := range sophonPatchBuild.Data.Manifests {
+		if manifestInfo.MatchingField == matchingField {
+			mani := manifest.GetLdiffManifest(manifestInfo)
+			if mani == nil {
+				logging.GlobalLogger.Fatal("Failed to fetch patch manifest for matching field: " + matchingField)
+			}
+			return mani, &manifestInfo
+		}
+	}
+
+	logging.GlobalLogger.Fatal("Failed to find matching patch manifest with field: " + matchingField)
 	return nil, nil
 }

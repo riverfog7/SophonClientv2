@@ -108,6 +108,24 @@ func TestParseAllManifests(t *testing.T) {
 	_ = inst.ParseManifest(mani, info.ChunkDownload)
 }
 
+func TestParseAllPatchManifests(t *testing.T) {
+	_, _ = operations.GetAndParsePatchManifest("hkrpg", "os", "game", "main")
+
+	_, _ = operations.GetAndParsePatchManifest("hkrpg", "cn", "game", "main")
+
+	_, _ = operations.GetAndParsePatchManifest("hk4e", "os", "game", "main")
+
+	_, _ = operations.GetAndParsePatchManifest("hk4e", "cn", "game", "main")
+
+	//_, _ = operations.GetAndParsePatchManifest("bh3", "os", "game", "main")
+
+	//_, _ = operations.GetAndParsePatchManifest("bh3", "cn", "game", "main")
+
+	_, _ = operations.GetAndParsePatchManifest("nap", "os", "game", "main")
+
+	_, _ = operations.GetAndParsePatchManifest("nap", "cn", "game", "main")
+}
+
 func TestFullInstallation(t *testing.T) {
 	f_c, err := os.Create("cpu.prof")
 	if err != nil {
