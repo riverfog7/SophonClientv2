@@ -43,14 +43,14 @@ type SophonPatchManifest struct {
 }
 
 type SophonGetPatchBuildAPIData struct {
-	BuildID   string           `json:"build_id"`
-	PatchID   string           `json:"patch_id"`
-	Tag       string           `json:"tag"`
-	Manifests []SophonManifest `json:"manifests"`
+	BuildID   string                `json:"build_id"`
+	PatchID   string                `json:"patch_id"`
+	Tag       string                `json:"tag"`
+	Manifests []SophonPatchManifest `json:"manifests"`
 }
 
 type SophonGetPatchBuildAPIResponse struct {
-	Retcode int                   `json:"retcode"`
-	Message string                `json:"message"`
-	Data    SophonGetBuildAPIData `json:"data"`
+	Retcode int                        `json:"retcode"`
+	Message string                     `json:"message"`
+	Data    SophonGetPatchBuildAPIData `json:"data"`
 }
