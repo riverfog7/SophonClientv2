@@ -20,15 +20,22 @@ func NonBlockingEnqueue[T any](ch chan<- T, item T) {
 	}
 }
 
-func CloseStreamSafe(stream interface{ Close() error }) {
+func CloseQuietly(stream io.Closer) {
 	if stream == nil {
 		return
 	}
-	_, err := io.Copy(io.Discard, stream.(io.Reader))
-	if err != nil {
+	if err := stream.Close(); err != nil {
+		logging.GlobalLogger.Warn(fmt.Sprintf("Failed to close stream: %v", err))
+	}
+}
+
+func DrainAndClose(stream io.ReadCloser) {
+	if stream == nil {
+		return
+	}
+	if _, err := io.Copy(io.Discard, stream); err != nil {
 		logging.GlobalLogger.Warn(fmt.Sprintf("Failed to drain stream before closing: %v", err))
 	}
-
 	if err := stream.Close(); err != nil {
 		logging.GlobalLogger.Warn(fmt.Sprintf("Failed to close stream: %v", err))
 	}

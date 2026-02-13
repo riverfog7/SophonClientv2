@@ -30,39 +30,44 @@ func (worker *DownloaderWorker) Start() {
 		defer worker.wg.Done()
 		maxRetries := config.Config.MaxChunkDownloadRetries
 		for input := range worker.InputQueue {
-			var resp *http.Response
-			var err error
 			for attempt := 1; attempt <= maxRetries; attempt++ {
-				resp, err = worker.HttpClient.Get(input.Url)
-				if err == nil && resp.StatusCode == http.StatusOK {
-					logging.GlobalLogger.Debug("Worker " + strconv.Itoa(worker.Id) + ": Successfully downloaded chunk from " + input.Url)
-					var contentBytes []byte
-					contentBytes, err = io.ReadAll(resp.Body)
-					utils.CloseStreamSafe(resp.Body)
-					if err != nil {
-						logging.GlobalLogger.Error("Worker " + strconv.Itoa(worker.Id) + ": Error reading response body from " + input.Url + ": " + err.Error())
-						contentBytes = nil
+				resp, err := worker.HttpClient.Get(input.Url)
+				if err != nil {
+					if attempt < maxRetries {
+						logging.GlobalLogger.Warn("Worker " + strconv.Itoa(worker.Id) + ": Failed to download chunk, retrying... (attempt " + strconv.Itoa(attempt) + ")")
 						continue
 					}
-
-					worker.OutputQueue <- DownloaderOutput{Content: io.NopCloser(bytes.NewReader(contentBytes)), Suceeded: true, Payload: input.Payload}
+					logging.GlobalLogger.Error("Worker " + strconv.Itoa(worker.Id) + ": Failed to download chunk from " + input.Url + ": " + err.Error())
+					worker.OutputQueue <- DownloaderOutput{Content: nil, Suceeded: false, Payload: input.Payload}
 					break
 				}
-				if attempt < maxRetries {
-					logging.GlobalLogger.Warn("Worker " + strconv.Itoa(worker.Id) + ": Failed to download chunk, retrying... (attempt " + strconv.Itoa(attempt) + ")")
-					continue
+
+				if resp.StatusCode != http.StatusOK {
+					utils.DrainAndClose(resp.Body)
+					if attempt < maxRetries {
+						logging.GlobalLogger.Warn("Worker " + strconv.Itoa(worker.Id) + ": Failed to download chunk with status " + resp.Status + ", retrying... (attempt " + strconv.Itoa(attempt) + ")")
+						continue
+					}
+					logging.GlobalLogger.Error("Worker " + strconv.Itoa(worker.Id) + ": Failed to download chunk from " + input.Url + " with status " + resp.Status)
+					worker.OutputQueue <- DownloaderOutput{Content: nil, Suceeded: false, Payload: input.Payload}
+					break
 				}
 
-				// Cleanup on final failure
-				if resp != nil && resp.Body != nil {
-					utils.CloseStreamSafe(resp.Body)
+				contentBytes, readErr := io.ReadAll(resp.Body)
+				utils.CloseQuietly(resp.Body)
+				if readErr != nil {
+					if attempt < maxRetries {
+						logging.GlobalLogger.Warn("Worker " + strconv.Itoa(worker.Id) + ": Failed to read chunk body, retrying... (attempt " + strconv.Itoa(attempt) + ")")
+						continue
+					}
+					logging.GlobalLogger.Error("Worker " + strconv.Itoa(worker.Id) + ": Error reading response body from " + input.Url + ": " + readErr.Error())
+					worker.OutputQueue <- DownloaderOutput{Content: nil, Suceeded: false, Payload: input.Payload}
+					break
 				}
-				if err != nil {
-					logging.GlobalLogger.Error("Worker " + strconv.Itoa(worker.Id) + ": Failed to download chunk from " + input.Url + ": " + err.Error())
-				} else {
-					logging.GlobalLogger.Error("Worker " + strconv.Itoa(worker.Id) + ": Failed to download chunk from " + input.Url)
-				}
-				worker.OutputQueue <- DownloaderOutput{Content: nil, Suceeded: false, Payload: input.Payload}
+
+				logging.GlobalLogger.Debug("Worker " + strconv.Itoa(worker.Id) + ": Successfully downloaded chunk from " + input.Url)
+				worker.OutputQueue <- DownloaderOutput{Content: io.NopCloser(bytes.NewReader(contentBytes)), Suceeded: true, Payload: input.Payload}
+				break
 			}
 		}
 	}()

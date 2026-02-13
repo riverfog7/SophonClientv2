@@ -35,7 +35,7 @@ func (worker *DecompressorWorker) Start() {
 		for input := range worker.InputQueue {
 			dec, err := zstd.NewReader(input.Content)
 			if err != nil {
-				input.Content.Close()
+				utils.CloseQuietly(input.Content)
 				logging.GlobalLogger.Error("Worker " + strconv.Itoa(worker.Id) + ": Failed to create zstd reader: " + err.Error())
 				worker.OutputQueue <- DecompressorOutput{Content: nil, Suceeded: false, Payload: input.Payload}
 				continue
