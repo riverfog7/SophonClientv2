@@ -9,9 +9,9 @@ import (
 )
 
 func NewInstaller(gameDir, stagingDir string, queueSize int) *Installer {
-	retryDispatchSize := queueSize * 8
-	if retryDispatchSize < 128 {
-		retryDispatchSize = 128
+	retryDispatchSize := queueSize * 64
+	if retryDispatchSize < 2048 {
+		retryDispatchSize = 2048
 	}
 
 	return &Installer{

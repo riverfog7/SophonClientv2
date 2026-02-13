@@ -60,10 +60,7 @@ func (inst *Installer) DownloadChunks() {
 				inst.setTerminalError(fmt.Errorf("empty chunk URL for chunk %s", input.Metadata.ChunkID))
 				continue
 			}
-			if !inst.Downloader.TryEnqueueDownload(input.Metadata.URL, input.Metadata) {
-				inst.enqueueRetryDispatch(input.Metadata, "download-backpressure")
-				continue
-			}
+			inst.Downloader.EnqueueDownload(input.Metadata.URL, input.Metadata)
 		}
 		logging.GlobalLogger.Info("InputQueue closed, stopping Downloader")
 		inst.Downloader.Stop()
