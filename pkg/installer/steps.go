@@ -15,7 +15,7 @@ func (inst *Installer) EnqueueChunks() {
 
 	orderedChunks := inst.EnumerateChunksWithFileOrder()
 	if len(orderedChunks) != len(inst.ChunkMap) {
-		logging.GlobalLogger.Fatal("Assertion Failed. Chunk enumeration mismatch. Something is wrong with the code.")
+		inst.setTerminalError(fmt.Errorf("chunk enumeration mismatch: ordered=%d mapped=%d", len(orderedChunks), len(inst.ChunkMap)))
 		return
 	}
 
@@ -29,7 +29,13 @@ func (inst *Installer) EnqueueChunks() {
 	go func() {
 		defer inst.wg.Done()
 		for _, cm := range orderedChunks {
-			utils.NonBlockingEnqueue(inst.InputQueue, ChunksInput{Metadata: cm})
+			if inst.hasTerminalError() {
+				break
+			}
+			if !inst.enqueueChunkInput(ChunksInput{Metadata: cm}) {
+				inst.setTerminalError(fmt.Errorf("failed to enqueue initial chunk %s", cm.ChunkID))
+				break
+			}
 		}
 		logging.GlobalLogger.Info("All initial chunks enqueued")
 	}()
@@ -42,6 +48,9 @@ func (inst *Installer) DownloadChunks() {
 	go func() {
 		defer inst.wg.Done()
 		for input := range inst.InputQueue {
+			if inst.hasTerminalError() {
+				continue
+			}
 			inst.Downloader.EnqueueDownload(input.Metadata.URL, input.Metadata)
 		}
 		logging.GlobalLogger.Info("InputQueue closed, stopping Downloader")
@@ -57,11 +66,15 @@ func (inst *Installer) DecompressChunks() {
 		defer inst.wg.Done()
 		for downloadOutput := range inst.Downloader.GetOutputChannel() {
 			cm := downloadOutput.Payload.(*ChunkMetaData)
+			if inst.hasTerminalError() {
+				utils.CloseQuietly(downloadOutput.Content)
+				continue
+			}
 
 			if !downloadOutput.Suceeded {
 				logging.GlobalLogger.Warn(fmt.Sprintf("Download failed for chunk %s, re-enqueueing", cm.ChunkID))
 				utils.CloseQuietly(downloadOutput.Content)
-				utils.NonBlockingEnqueue(inst.InputQueue, ChunksInput{Metadata: cm})
+				inst.tryRequeueChunk(cm, "download")
 				continue
 			}
 
@@ -71,9 +84,9 @@ func (inst *Installer) DecompressChunks() {
 				inst.Progress.IncrementDownloadedChunks()
 				inst.Progress.IncrementDownloadedBytes(int64(cm.CompressedSize))
 			} else {
-				// TODO: Handle uncompressed chunk (passthrough)
-				logging.GlobalLogger.Fatal("Uncompressed chunks are not yet supported")
-				return
+				utils.CloseQuietly(downloadOutput.Content)
+				inst.setTerminalError(fmt.Errorf("unsupported uncompressed chunk: %s", cm.ChunkID))
+				continue
 			}
 		}
 		logging.GlobalLogger.Info("Downloader output closed, stopping Decompressor")
@@ -89,14 +102,18 @@ func (inst *Installer) VerifyChunks() {
 		defer inst.wg.Done()
 		for decompressOutput := range inst.Decompressor.GetOutputChannel() {
 			cm := decompressOutput.Payload.(*ChunkMetaData)
+			if inst.hasTerminalError() {
+				utils.CloseQuietly(decompressOutput.Content)
+				continue
+			}
 
 			if !decompressOutput.Suceeded {
 				logging.GlobalLogger.Warn(fmt.Sprintf("Decompression failed for chunk %s, re-enqueueing", cm.ChunkID))
 				utils.CloseQuietly(decompressOutput.Content)
-				utils.NonBlockingEnqueue(inst.InputQueue, ChunksInput{Metadata: cm})
+				if inst.tryRequeueChunk(cm, "decompress") {
+					inst.Progress.IncrementTotalBytes(int64(cm.CompressedSize))
+				}
 
-				// Adjust downloaded bytes since we are re-enqueueing
-				inst.Progress.IncrementTotalBytes(int64(cm.CompressedSize))
 				continue
 			}
 
@@ -116,14 +133,18 @@ func (inst *Installer) AssembleChunks() {
 		defer inst.wg.Done()
 		for verifyOutput := range inst.Verifier.GetOutputChannel() {
 			cm := verifyOutput.Payload.(*ChunkMetaData)
+			if inst.hasTerminalError() {
+				utils.CloseQuietly(verifyOutput.Content)
+				continue
+			}
 
 			if !verifyOutput.Suceeded {
 				logging.GlobalLogger.Warn(fmt.Sprintf("Verification failed for chunk %s, re-enqueueing", cm.ChunkID))
 				utils.CloseQuietly(verifyOutput.Content)
-				utils.NonBlockingEnqueue(inst.InputQueue, ChunksInput{Metadata: cm})
+				if inst.tryRequeueChunk(cm, "chunk-verify") {
+					inst.Progress.IncrementTotalBytes(int64(cm.CompressedSize))
+				}
 
-				// Adjust downloaded bytes since we are re-enqueueing
-				inst.Progress.IncrementTotalBytes(int64(cm.CompressedSize))
 				continue
 			}
 			inst.Progress.IncrementVerifiedChunks()
@@ -137,9 +158,9 @@ func (inst *Installer) AssembleChunks() {
 			if err != nil {
 				logging.GlobalLogger.Error(fmt.Sprintf("Failed to read verified content for chunk %s: %v, re-enqueueing", cm.ChunkID, err))
 				contentBytes = nil // Content is already closed by readAll or CloseQuietly
-				utils.NonBlockingEnqueue(inst.InputQueue, ChunksInput{Metadata: cm})
-
-				inst.Progress.IncrementTotalBytes(int64(cm.CompressedSize))
+				if inst.tryRequeueChunk(cm, "chunk-read") {
+					inst.Progress.IncrementTotalBytes(int64(cm.CompressedSize))
+				}
 				continue
 			}
 
@@ -168,13 +189,15 @@ func (inst *Installer) VerifyFiles() {
 		for assemblerOutput := range inst.Assembler.GetOutputChannel() {
 			cm := assemblerOutput.Payload.(*ChunkMetaData)
 			filePath := assemblerOutput.FilePath
+			if inst.hasTerminalError() {
+				continue
+			}
 
 			if !assemblerOutput.Succeeded {
 				logging.GlobalLogger.Warn(fmt.Sprintf("Assembly failed for chunk %s, re-enqueueing", cm.ChunkID))
-				utils.NonBlockingEnqueue(inst.InputQueue, ChunksInput{Metadata: cm})
-
-				// Adjust downloaded bytes since we are re-enqueueing
-				inst.Progress.IncrementTotalBytes(int64(cm.CompressedSize))
+				if inst.tryRequeueChunk(cm, "assemble") {
+					inst.Progress.IncrementTotalBytes(int64(cm.CompressedSize))
+				}
 				continue
 			}
 			inst.Progress.IncrementAssembledChunks()
@@ -194,8 +217,8 @@ func (inst *Installer) VerifyFiles() {
 				}
 			}
 			if fileMeta == nil {
-				logging.GlobalLogger.Fatal(fmt.Sprintf("File metadata not found for assembled file: %s", filePath))
-				return
+				inst.setTerminalError(fmt.Errorf("file metadata not found for assembled file: %s", filePath))
+				continue
 			}
 
 			// Compute expected chunk count only once per file
@@ -228,8 +251,16 @@ func (inst *Installer) VerifyFiles() {
 						logging.GlobalLogger.Warn(fmt.Sprintf("Failed to remove corrupted staging file %s: %v", stagingPath, removeErr))
 					}
 
+					if !inst.tryRequeueFile(fileMeta.FilePath, "verify-file-open") {
+						continue
+					}
+
 					for _, chunkID := range fileMeta.Chunks {
-						chunkMeta := inst.ChunkMap[chunkID]
+						chunkMeta, ok := inst.ChunkMap[chunkID]
+						if !ok {
+							inst.setTerminalError(fmt.Errorf("chunk metadata not found for %s (%s)", fileMeta.FilePath, chunkID))
+							break
+						}
 
 						var offset uint64
 						var found bool
@@ -241,11 +272,10 @@ func (inst *Installer) VerifyFiles() {
 							}
 						}
 						if !found {
-							logging.GlobalLogger.Fatal(fmt.Sprintf("Offset not found for file %s in chunk %s", fileMeta.FilePath, chunkID))
-							return
+							inst.setTerminalError(fmt.Errorf("offset not found for file %s in chunk %s", fileMeta.FilePath, chunkID))
+							break
 						}
 
-						// Create new ChunkMetaData for re-enqueueing (only for this file)
 						cm_new := &ChunkMetaData{
 							ChunkID:          chunkMeta.ChunkID,
 							URL:              chunkMeta.URL,
@@ -258,9 +288,12 @@ func (inst *Installer) VerifyFiles() {
 							},
 						}
 
-						utils.NonBlockingEnqueue(inst.InputQueue, ChunksInput{Metadata: cm_new})
-
-						inst.Progress.IncrementTotalBytes(int64(chunkMeta.CompressedSize))
+						if inst.tryRequeueChunk(cm_new, "verify-file-open") {
+							inst.Progress.IncrementTotalBytes(int64(chunkMeta.CompressedSize))
+						}
+						if inst.hasTerminalError() {
+							break
+						}
 					}
 					continue
 				}
@@ -283,19 +316,30 @@ func (inst *Installer) MoveFiles() {
 	go func() {
 		defer inst.wg.Done()
 		for verifyOutput := range inst.Verifier2.GetOutputChannel() {
+			if inst.hasTerminalError() {
+				continue
+			}
+
 			fm := verifyOutput.Payload.(*FileMetaData)
 			stagingPath := filepath.Join(inst.StagingDir, fm.FilePath)
 			finalPath := filepath.Join(inst.GameDir, fm.FilePath)
 
 			if !verifyOutput.Suceeded {
 				logging.GlobalLogger.Error(fmt.Sprintf("File verification failed: %s - re-enqueueing all chunks", fm.FilePath))
+				if !inst.tryRequeueFile(fm.FilePath, "file-verify") {
+					continue
+				}
 
 				if removeErr := os.Remove(stagingPath); removeErr != nil && !os.IsNotExist(removeErr) {
 					logging.GlobalLogger.Warn(fmt.Sprintf("Failed to remove corrupted staging file %s: %v", stagingPath, removeErr))
 				}
 
 				for _, chunkID := range fm.Chunks {
-					cm := inst.ChunkMap[chunkID]
+					cm, ok := inst.ChunkMap[chunkID]
+					if !ok {
+						inst.setTerminalError(fmt.Errorf("chunk metadata not found for %s (%s)", fm.FilePath, chunkID))
+						break
+					}
 
 					var offset uint64
 					var offsetFound bool
@@ -307,7 +351,8 @@ func (inst *Installer) MoveFiles() {
 						}
 					}
 					if !offsetFound {
-						logging.GlobalLogger.Fatal(fmt.Sprintf("Offset not found for file %s in chunk %s", fm.FilePath, chunkID))
+						inst.setTerminalError(fmt.Errorf("offset not found for file %s in chunk %s", fm.FilePath, chunkID))
+						break
 					}
 
 					new_cm := &ChunkMetaData{
@@ -322,9 +367,12 @@ func (inst *Installer) MoveFiles() {
 						},
 					}
 
-					utils.NonBlockingEnqueue(inst.InputQueue, ChunksInput{Metadata: new_cm})
-
-					inst.Progress.IncrementTotalBytes(int64(cm.CompressedSize))
+					if inst.tryRequeueChunk(new_cm, "file-verify") {
+						inst.Progress.IncrementTotalBytes(int64(cm.CompressedSize))
+					}
+					if inst.hasTerminalError() {
+						break
+					}
 				}
 				continue
 			}
@@ -332,14 +380,14 @@ func (inst *Installer) MoveFiles() {
 
 			finalDir := filepath.Dir(finalPath)
 			if err := os.MkdirAll(finalDir, 0o755); err != nil {
-				logging.GlobalLogger.Fatal(fmt.Sprintf("Failed to create directory for final file location: %s : %v", finalDir, err))
-				return
+				inst.setTerminalError(fmt.Errorf("failed to create final directory %s: %w", finalDir, err))
+				continue
 			}
 
 			err := os.Rename(stagingPath, finalPath)
 			if err != nil {
-				logging.GlobalLogger.Fatal(fmt.Sprintf("Failed to move file from staging to final location: %s -> %s : %v", stagingPath, finalPath, err))
-				return
+				inst.setTerminalError(fmt.Errorf("failed to move file %s -> %s: %w", stagingPath, finalPath, err))
+				continue
 			}
 
 			inst.Progress.IncrementVerifiedFiles()

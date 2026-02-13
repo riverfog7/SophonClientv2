@@ -36,5 +36,9 @@ func (inst *Installer) Stop() {
 func (inst *Installer) Wait() {
 	logging.GlobalLogger.Info("Waiting for installation to complete")
 	inst.wg.Wait()
+	if err := inst.getTerminalError(); err != nil {
+		logging.GlobalLogger.Error("Installation stopped with error: " + err.Error())
+		return
+	}
 	logging.GlobalLogger.Info("Installation completed successfully")
 }

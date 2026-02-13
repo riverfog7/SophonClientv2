@@ -5,6 +5,7 @@ import (
 	"SophonClientv2/internal/models"
 	"fmt"
 	"sort"
+	"sync"
 )
 
 func (inst *Installer) ParseManifest(mani *models.Manifest, chunkDownload models.SophonChunkDownloadInfo) error {
@@ -12,6 +13,14 @@ func (inst *Installer) ParseManifest(mani *models.Manifest, chunkDownload models
 	inst.ChunkMap = make(map[string]*ChunkMetaData)
 	inst.FileMap = make(map[string]*FileMetaData)
 	inst.Progress = InstallProgress{}
+	inst.retryMu.Lock()
+	inst.chunkRetryCounts = make(map[string]int)
+	inst.fileRetryCounts = make(map[string]int)
+	inst.retryMu.Unlock()
+	inst.terminalErrMu.Lock()
+	inst.terminalErr = nil
+	inst.terminalErrMu.Unlock()
+	inst.terminalErrOnce = sync.Once{}
 
 	for _, fi := range mani.GetFiles() {
 		filePath := fi.GetFilename()

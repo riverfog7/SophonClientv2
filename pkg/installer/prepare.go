@@ -21,6 +21,7 @@ func (inst *Installer) Prepare() error {
 	// Set up verifier and enqueue existing files
 	// Queue size should be enough to hold all files (No subscriber for output yet)
 	ver := verifier.NewVerifier(len(inst.FileMap)+10, false)
+	defer ver.Stop()
 	jobs := 0
 	for filePath, fm := range inst.FileMap {
 		absPath := filepath.Join(inst.GameDir, filePath)
@@ -30,7 +31,7 @@ func (inst *Installer) Prepare() error {
 				logging.GlobalLogger.Debug(fmt.Sprintf("File not present, will download: %s", absPath))
 				continue
 			}
-			logging.GlobalLogger.Fatal(fmt.Sprintf("Error stating file %s: %v", absPath, err))
+			logging.GlobalLogger.Error(fmt.Sprintf("Error stating file %s: %v", absPath, err))
 			return fmt.Errorf("stat existing file %s: %w", absPath, err)
 		}
 		if info.IsDir() {
@@ -41,7 +42,7 @@ func (inst *Installer) Prepare() error {
 		// MD5 hashcheck (submits to verifier)
 		f, err := os.Open(absPath)
 		if err != nil {
-			logging.GlobalLogger.Fatal(fmt.Sprintf("Error opening existing file %s: %v", absPath, err))
+			logging.GlobalLogger.Error(fmt.Sprintf("Error opening existing file %s: %v", absPath, err))
 			return fmt.Errorf("opening existing file %s: %w", absPath, err)
 		}
 		ver.EnqueueVerification(f.Name(), f, fm.MD5, fm)
@@ -76,12 +77,11 @@ func (inst *Installer) Prepare() error {
 		} else {
 			logging.GlobalLogger.Warn(fmt.Sprintf("File failed verification, deleting: %s", absPath))
 			if err := os.Remove(absPath); err != nil {
-				logging.GlobalLogger.Fatal(fmt.Sprintf("Error deleting file %s: %v", absPath, err))
+				logging.GlobalLogger.Error(fmt.Sprintf("Error deleting file %s: %v", absPath, err))
 				return fmt.Errorf("deleting invalid file %s: %w", absPath, err)
 			}
 		}
 	}
-	ver.Stop()
 	inst.Progress.mu.Lock()
 	inst.Progress.TotalChunks = len(inst.ChunkMap)
 	inst.Progress.TotalFiles = len(inst.FileMap)

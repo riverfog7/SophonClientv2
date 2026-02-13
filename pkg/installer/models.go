@@ -72,6 +72,16 @@ type Installer struct {
 
 	wg sync.WaitGroup
 
+	retryMu                 sync.Mutex
+	chunkRetryCounts        map[string]int
+	fileRetryCounts         map[string]int
+	maxChunkPipelineRetries int
+	maxFileRebuildRetries   int
+
+	terminalErrMu   sync.RWMutex
+	terminalErr     error
+	terminalErrOnce sync.Once
+
 	inputQueueCloseOnce sync.Once
 	stopOnce            sync.Once
 }
