@@ -8,6 +8,30 @@ import (
 	"path/filepath"
 )
 
+func (inst *Installer) removeFileFromPlan(fm *FileMetaData) {
+	for _, chunkID := range fm.Chunks {
+		cm, ok := inst.ChunkMap[chunkID]
+		if !ok {
+			continue
+		}
+
+		newDestinations := make([]ChunkDestination, 0, len(cm.Destinations))
+		for _, dest := range cm.Destinations {
+			if dest.File != fm {
+				newDestinations = append(newDestinations, dest)
+			}
+		}
+
+		if len(newDestinations) == 0 {
+			delete(inst.ChunkMap, chunkID)
+		} else {
+			cm.Destinations = newDestinations
+		}
+	}
+
+	delete(inst.FileMap, fm.FilePath)
+}
+
 func (inst *Installer) Prepare() error {
 	// Clear staging directory (remove previous probably failed downloads)
 	logging.GlobalLogger.Info("Clearing staging directory")
@@ -16,6 +40,20 @@ func (inst *Installer) Prepare() error {
 	if err := os.MkdirAll(inst.StagingDir, 0o755); err != nil {
 		logging.GlobalLogger.Error(fmt.Sprintf("Error creating staging dir: %v", err))
 		return fmt.Errorf("creating staging dir: %w", err)
+	}
+
+	removedFolders := 0
+	for filePath, fm := range inst.FileMap {
+		if !fm.IsFolder {
+			continue
+		}
+
+		inst.removeFileFromPlan(fm)
+		removedFolders++
+		logging.GlobalLogger.Debug(fmt.Sprintf("Removed folder entry from install plan: %s", filePath))
+	}
+	if removedFolders > 0 {
+		logging.GlobalLogger.Info(fmt.Sprintf("Removed %d folder entries from install file accounting", removedFolders))
 	}
 
 	// Set up verifier and enqueue existing files
@@ -57,23 +95,7 @@ func (inst *Installer) Prepare() error {
 
 		if out.Suceeded {
 			logging.GlobalLogger.Debug(fmt.Sprintf("Existing file verified, skipping download: %s", absPath))
-
-			for _, chunkID := range fmOut.Chunks {
-				if cm, ok := inst.ChunkMap[chunkID]; ok {
-					newD := make([]ChunkDestination, 0, len(cm.Destinations))
-					for _, dest := range cm.Destinations {
-						if dest.File != fmOut {
-							newD = append(newD, dest)
-						}
-					}
-					if len(newD) == 0 {
-						delete(inst.ChunkMap, chunkID)
-					} else {
-						cm.Destinations = newD
-					}
-				}
-			}
-			delete(inst.FileMap, fmOut.FilePath)
+			inst.removeFileFromPlan(fmOut)
 		} else {
 			logging.GlobalLogger.Warn(fmt.Sprintf("File failed verification, deleting: %s", absPath))
 			if err := os.Remove(absPath); err != nil {
