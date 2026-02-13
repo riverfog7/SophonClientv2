@@ -82,6 +82,10 @@ type Installer struct {
 	terminalErr     error
 	terminalErrOnce sync.Once
 
+	completionMu              sync.Mutex
+	completedFiles            map[string]struct{}
+	inFlightFileVerifications map[string]struct{}
+
 	inputQueueCloseOnce sync.Once
 	stopOnce            sync.Once
 }

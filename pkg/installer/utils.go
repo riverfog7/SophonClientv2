@@ -21,6 +21,10 @@ func (inst *Installer) ParseManifest(mani *models.Manifest, chunkDownload models
 	inst.terminalErr = nil
 	inst.terminalErrMu.Unlock()
 	inst.terminalErrOnce = sync.Once{}
+	inst.completionMu.Lock()
+	inst.completedFiles = make(map[string]struct{})
+	inst.inFlightFileVerifications = make(map[string]struct{})
+	inst.completionMu.Unlock()
 
 	for _, fi := range mani.GetFiles() {
 		filePath := fi.GetFilename()

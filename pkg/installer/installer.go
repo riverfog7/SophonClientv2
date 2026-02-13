@@ -29,5 +29,8 @@ func NewInstaller(gameDir, stagingDir string, queueSize int) *Installer {
 		fileRetryCounts:         make(map[string]int),
 		maxChunkPipelineRetries: config.Config.MaxChunkPipelineRetries,
 		maxFileRebuildRetries:   config.Config.MaxFileRebuildRetries,
+
+		completedFiles:            make(map[string]struct{}),
+		inFlightFileVerifications: make(map[string]struct{}),
 	}
 }

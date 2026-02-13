@@ -36,6 +36,59 @@ func (inst *Installer) hasTerminalError() bool {
 	return inst.getTerminalError() != nil
 }
 
+func (inst *Installer) isFileCompleted(filePath string) bool {
+	inst.completionMu.Lock()
+	defer inst.completionMu.Unlock()
+	_, ok := inst.completedFiles[filePath]
+	return ok
+}
+
+func (inst *Installer) tryMarkFileVerifyInFlight(filePath string) bool {
+	if filePath == "" {
+		return false
+	}
+
+	inst.completionMu.Lock()
+	defer inst.completionMu.Unlock()
+
+	if _, ok := inst.completedFiles[filePath]; ok {
+		return false
+	}
+	if _, ok := inst.inFlightFileVerifications[filePath]; ok {
+		return false
+	}
+
+	inst.inFlightFileVerifications[filePath] = struct{}{}
+	return true
+}
+
+func (inst *Installer) clearFileVerifyInFlight(filePath string) {
+	if filePath == "" {
+		return
+	}
+
+	inst.completionMu.Lock()
+	delete(inst.inFlightFileVerifications, filePath)
+	inst.completionMu.Unlock()
+}
+
+func (inst *Installer) markFileCompleted(filePath string) (bool, int) {
+	if filePath == "" {
+		return false, 0
+	}
+
+	inst.completionMu.Lock()
+	defer inst.completionMu.Unlock()
+
+	delete(inst.inFlightFileVerifications, filePath)
+	if _, ok := inst.completedFiles[filePath]; ok {
+		return false, len(inst.completedFiles)
+	}
+
+	inst.completedFiles[filePath] = struct{}{}
+	return true, len(inst.completedFiles)
+}
+
 func (inst *Installer) chunkPayload(payload any, stage string) (*ChunkMetaData, bool) {
 	cm, ok := payload.(*ChunkMetaData)
 	if !ok || cm == nil {

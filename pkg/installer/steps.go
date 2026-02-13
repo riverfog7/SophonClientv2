@@ -279,12 +279,19 @@ func (inst *Installer) VerifyFiles() {
 			expectedChunkInstances := fileExpectedChunks[filePath]
 			logging.GlobalLogger.Debug(fmt.Sprintf("File %s: Assembled Chunks: %d, Expected Chunk Instances: %d", filePath, len(fileAssembledChunks[filePath]), expectedChunkInstances))
 			if len(fileAssembledChunks[filePath]) == expectedChunkInstances {
+				if !inst.tryMarkFileVerifyInFlight(filePath) {
+					delete(fileAssembledChunks, filePath)
+					delete(fileExpectedChunks, filePath)
+					continue
+				}
+
 				stagingPath := filepath.Join(inst.StagingDir, filePath)
 				logging.GlobalLogger.Info(fmt.Sprintf("File complete, verifying: %s", filePath))
 
 				f, err := os.Open(stagingPath)
 				if err != nil {
 					logging.GlobalLogger.Error(fmt.Sprintf("Failed to open completed file %s: %v - re-enqueueing all chunks for this file", stagingPath, err))
+					inst.clearFileVerifyInFlight(filePath)
 
 					delete(fileAssembledChunks, filePath)
 					delete(fileExpectedChunks, filePath)
@@ -370,12 +377,17 @@ func (inst *Installer) MoveFiles() {
 				inst.setTerminalError(fmt.Errorf("empty file path in file verifier output"))
 				continue
 			}
+			if inst.isFileCompleted(fm.FilePath) {
+				inst.clearFileVerifyInFlight(fm.FilePath)
+				continue
+			}
 
 			stagingPath := filepath.Join(inst.StagingDir, fm.FilePath)
 			finalPath := filepath.Join(inst.GameDir, fm.FilePath)
 
 			if !verifyOutput.Suceeded {
 				logging.GlobalLogger.Error(fmt.Sprintf("File verification failed: %s - re-enqueueing all chunks", fm.FilePath))
+				inst.clearFileVerifyInFlight(fm.FilePath)
 				if !inst.tryRequeueFile(fm.FilePath, "file-verify") {
 					continue
 				}
@@ -440,9 +452,14 @@ func (inst *Installer) MoveFiles() {
 				continue
 			}
 
-			inst.Progress.IncrementVerifiedFiles()
+			newlyCompleted, completedCount := inst.markFileCompleted(fm.FilePath)
+			if !newlyCompleted {
+				continue
+			}
+
 			inst.Progress.mu.Lock()
-			verifiedFiles := inst.Progress.VerifiedFiles
+			inst.Progress.VerifiedFiles = completedCount
+			verifiedFiles := completedCount
 			totalFiles := inst.Progress.TotalFiles
 			inst.Progress.mu.Unlock()
 
