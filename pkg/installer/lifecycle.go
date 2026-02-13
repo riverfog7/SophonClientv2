@@ -36,6 +36,24 @@ func (inst *Installer) hasTerminalError() bool {
 	return inst.getTerminalError() != nil
 }
 
+func (inst *Installer) chunkPayload(payload any, stage string) (*ChunkMetaData, bool) {
+	cm, ok := payload.(*ChunkMetaData)
+	if !ok || cm == nil {
+		inst.setTerminalError(fmt.Errorf("invalid chunk payload at %s: %T", stage, payload))
+		return nil, false
+	}
+	return cm, true
+}
+
+func (inst *Installer) filePayload(payload any, stage string) (*FileMetaData, bool) {
+	fm, ok := payload.(*FileMetaData)
+	if !ok || fm == nil {
+		inst.setTerminalError(fmt.Errorf("invalid file payload at %s: %T", stage, payload))
+		return nil, false
+	}
+	return fm, true
+}
+
 func (inst *Installer) enqueueChunkInput(input ChunksInput) (ok bool) {
 	if inst.hasTerminalError() {
 		return false

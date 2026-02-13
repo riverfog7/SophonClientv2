@@ -51,6 +51,14 @@ func (inst *Installer) DownloadChunks() {
 			if inst.hasTerminalError() {
 				continue
 			}
+			if input.Metadata == nil {
+				inst.setTerminalError(fmt.Errorf("received nil chunk metadata in download stage"))
+				continue
+			}
+			if input.Metadata.URL == "" {
+				inst.setTerminalError(fmt.Errorf("empty chunk URL for chunk %s", input.Metadata.ChunkID))
+				continue
+			}
 			inst.Downloader.EnqueueDownload(input.Metadata.URL, input.Metadata)
 		}
 		logging.GlobalLogger.Info("InputQueue closed, stopping Downloader")
@@ -65,7 +73,11 @@ func (inst *Installer) DecompressChunks() {
 	go func() {
 		defer inst.wg.Done()
 		for downloadOutput := range inst.Downloader.GetOutputChannel() {
-			cm := downloadOutput.Payload.(*ChunkMetaData)
+			cm, ok := inst.chunkPayload(downloadOutput.Payload, "download-output")
+			if !ok {
+				utils.CloseQuietly(downloadOutput.Content)
+				continue
+			}
 			if inst.hasTerminalError() {
 				utils.CloseQuietly(downloadOutput.Content)
 				continue
@@ -101,7 +113,11 @@ func (inst *Installer) VerifyChunks() {
 	go func() {
 		defer inst.wg.Done()
 		for decompressOutput := range inst.Decompressor.GetOutputChannel() {
-			cm := decompressOutput.Payload.(*ChunkMetaData)
+			cm, ok := inst.chunkPayload(decompressOutput.Payload, "decompress-output")
+			if !ok {
+				utils.CloseQuietly(decompressOutput.Content)
+				continue
+			}
 			if inst.hasTerminalError() {
 				utils.CloseQuietly(decompressOutput.Content)
 				continue
@@ -132,7 +148,11 @@ func (inst *Installer) AssembleChunks() {
 	go func() {
 		defer inst.wg.Done()
 		for verifyOutput := range inst.Verifier.GetOutputChannel() {
-			cm := verifyOutput.Payload.(*ChunkMetaData)
+			cm, ok := inst.chunkPayload(verifyOutput.Payload, "chunk-verify-output")
+			if !ok {
+				utils.CloseQuietly(verifyOutput.Content)
+				continue
+			}
 			if inst.hasTerminalError() {
 				utils.CloseQuietly(verifyOutput.Content)
 				continue
@@ -165,6 +185,18 @@ func (inst *Installer) AssembleChunks() {
 			}
 
 			// Create a new reader for each destination
+			validDestinations := true
+			for _, dest := range cm.Destinations {
+				if dest.File == nil || dest.File.FilePath == "" {
+					inst.setTerminalError(fmt.Errorf("invalid destination for chunk %s", cm.ChunkID))
+					validDestinations = false
+					break
+				}
+			}
+			if !validDestinations {
+				continue
+			}
+
 			for _, dest := range cm.Destinations {
 				inst.Assembler.EnqueueWrite(dest.File.FilePath, dest.Offset, cm.ChunkID, io.NopCloser(bytes.NewReader(contentBytes)), cm)
 			}
@@ -187,9 +219,16 @@ func (inst *Installer) VerifyFiles() {
 		fileExpectedChunks := make(map[string]int)
 
 		for assemblerOutput := range inst.Assembler.GetOutputChannel() {
-			cm := assemblerOutput.Payload.(*ChunkMetaData)
+			cm, ok := inst.chunkPayload(assemblerOutput.Payload, "assembler-output")
+			if !ok {
+				continue
+			}
 			filePath := assemblerOutput.FilePath
 			if inst.hasTerminalError() {
+				continue
+			}
+			if filePath == "" {
+				inst.setTerminalError(fmt.Errorf("empty file path in assembler output for chunk %s", cm.ChunkID))
 				continue
 			}
 
@@ -210,6 +249,9 @@ func (inst *Installer) VerifyFiles() {
 			var offset uint64
 			var fileMeta *FileMetaData
 			for _, dest := range cm.Destinations {
+				if dest.File == nil {
+					continue
+				}
 				if dest.File.FilePath == filePath {
 					fileMeta = dest.File
 					offset = dest.Offset
@@ -320,7 +362,15 @@ func (inst *Installer) MoveFiles() {
 				continue
 			}
 
-			fm := verifyOutput.Payload.(*FileMetaData)
+			fm, ok := inst.filePayload(verifyOutput.Payload, "file-verify-output")
+			if !ok {
+				continue
+			}
+			if fm.FilePath == "" {
+				inst.setTerminalError(fmt.Errorf("empty file path in file verifier output"))
+				continue
+			}
+
 			stagingPath := filepath.Join(inst.StagingDir, fm.FilePath)
 			finalPath := filepath.Join(inst.GameDir, fm.FilePath)
 
