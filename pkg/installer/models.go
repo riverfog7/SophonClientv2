@@ -54,6 +54,11 @@ type FileOutput struct {
 	FilePath string
 }
 
+type retryDispatchInput struct {
+	Metadata *ChunkMetaData
+	Stage    string
+}
+
 type Installer struct {
 	GameDir    string
 	StagingDir string
@@ -62,7 +67,11 @@ type Installer struct {
 	FileMap  map[string]*FileMetaData
 	Progress InstallProgress
 
-	InputQueue chan ChunksInput
+	InputQueue         chan ChunksInput
+	retryDispatchQueue chan retryDispatchInput
+
+	inputQueueStateMu sync.RWMutex
+	inputQueueClosed  bool
 
 	Downloader   *downloader.Downloader
 	Decompressor *decompressor.Decompressor

@@ -148,6 +148,21 @@ func (d *Downloader) EnqueueDownload(url string, payload any) {
 	utils.NonBlockingEnqueue(d.InputQueue, DownloaderInput{Url: url, Payload: payload})
 }
 
+func (d *Downloader) TryEnqueueDownload(url string, payload any) (ok bool) {
+	defer func() {
+		if recover() != nil {
+			ok = false
+		}
+	}()
+
+	select {
+	case d.InputQueue <- DownloaderInput{Url: url, Payload: payload}:
+		return true
+	default:
+		return false
+	}
+}
+
 func (d *Downloader) GetOutputChannel() chan DownloaderOutput {
 	return d.OutputQueue
 }

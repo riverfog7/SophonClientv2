@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"time"
 )
 
 func (inst *Installer) EnqueueChunks() {
@@ -59,10 +60,56 @@ func (inst *Installer) DownloadChunks() {
 				inst.setTerminalError(fmt.Errorf("empty chunk URL for chunk %s", input.Metadata.ChunkID))
 				continue
 			}
-			inst.Downloader.EnqueueDownload(input.Metadata.URL, input.Metadata)
+			if !inst.Downloader.TryEnqueueDownload(input.Metadata.URL, input.Metadata) {
+				inst.enqueueRetryDispatch(input.Metadata, "download-backpressure")
+				continue
+			}
 		}
 		logging.GlobalLogger.Info("InputQueue closed, stopping Downloader")
 		inst.Downloader.Stop()
+	}()
+}
+
+func (inst *Installer) DispatchChunkRetries() {
+	logging.GlobalLogger.Info("Starting chunk retry dispatcher")
+
+	inst.wg.Add(1)
+	go func() {
+		defer inst.wg.Done()
+
+		ticker := time.NewTicker(10 * time.Millisecond)
+		defer ticker.Stop()
+
+		for {
+			if inst.hasTerminalError() {
+				return
+			}
+
+			if inst.isInputQueueClosed() && len(inst.retryDispatchQueue) == 0 {
+				logging.GlobalLogger.Info("Retry dispatcher exiting: input queue closed and retry queue drained")
+				return
+			}
+
+			select {
+			case retry := <-inst.retryDispatchQueue:
+				if retry.Metadata == nil {
+					inst.setTerminalError(fmt.Errorf("nil chunk metadata received in retry dispatcher from %s", retry.Stage))
+					continue
+				}
+
+				if inst.hasTerminalError() || inst.isInputQueueClosed() {
+					continue
+				}
+
+				if !inst.enqueueChunkInput(ChunksInput{Metadata: retry.Metadata}) {
+					if inst.hasTerminalError() || inst.isInputQueueClosed() {
+						continue
+					}
+					inst.setTerminalError(fmt.Errorf("failed to enqueue retry chunk %s from %s", retry.Metadata.ChunkID, retry.Stage))
+				}
+			case <-ticker.C:
+			}
+		}
 	}()
 }
 

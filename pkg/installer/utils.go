@@ -25,6 +25,19 @@ func (inst *Installer) ParseManifest(mani *models.Manifest, chunkDownload models
 	inst.completedFiles = make(map[string]struct{})
 	inst.inFlightFileVerifications = make(map[string]struct{})
 	inst.completionMu.Unlock()
+	inst.inputQueueStateMu.Lock()
+	inst.inputQueueClosed = false
+	inst.inputQueueStateMu.Unlock()
+
+	for {
+		select {
+		case <-inst.retryDispatchQueue:
+		default:
+			goto retryQueueDrained
+		}
+	}
+
+retryQueueDrained:
 
 	for _, fi := range mani.GetFiles() {
 		filePath := fi.GetFilename()

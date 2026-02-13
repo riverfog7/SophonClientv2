@@ -16,8 +16,41 @@ func chunkInstanceKey(chunkID string, offset uint64) string {
 
 func (inst *Installer) closeInputQueue() {
 	inst.inputQueueCloseOnce.Do(func() {
+		inst.inputQueueStateMu.Lock()
+		inst.inputQueueClosed = true
+		inst.inputQueueStateMu.Unlock()
 		close(inst.InputQueue)
 	})
+}
+
+func (inst *Installer) isInputQueueClosed() bool {
+	inst.inputQueueStateMu.RLock()
+	defer inst.inputQueueStateMu.RUnlock()
+	return inst.inputQueueClosed
+}
+
+func (inst *Installer) enqueueRetryDispatch(cm *ChunkMetaData, stage string) (ok bool) {
+	if cm == nil {
+		inst.setTerminalError(fmt.Errorf("nil chunk metadata for retry dispatch at %s", stage))
+		return false
+	}
+	if inst.hasTerminalError() || inst.isInputQueueClosed() {
+		return false
+	}
+
+	defer func() {
+		if recover() != nil {
+			ok = false
+		}
+	}()
+
+	select {
+	case inst.retryDispatchQueue <- retryDispatchInput{Metadata: cm, Stage: stage}:
+		return true
+	default:
+		inst.setTerminalError(fmt.Errorf("retry dispatch queue saturated at %s", stage))
+		return false
+	}
 }
 
 func (inst *Installer) setTerminalError(err error) {
@@ -197,6 +230,9 @@ func (inst *Installer) tryRequeueChunk(cm *ChunkMetaData, stage string) bool {
 		inst.setTerminalError(fmt.Errorf("nil chunk metadata at %s", stage))
 		return false
 	}
+	if inst.hasTerminalError() || inst.isInputQueueClosed() {
+		return false
+	}
 
 	key := inst.chunkRetryKey(cm)
 
@@ -210,8 +246,11 @@ func (inst *Installer) tryRequeueChunk(cm *ChunkMetaData, stage string) bool {
 	inst.chunkRetryCounts[key] = count + 1
 	inst.retryMu.Unlock()
 
-	if !inst.enqueueChunkInput(ChunksInput{Metadata: cm}) {
-		inst.setTerminalError(fmt.Errorf("failed to re-enqueue chunk %s at %s", key, stage))
+	if !inst.enqueueRetryDispatch(cm, stage) {
+		if inst.hasTerminalError() || inst.isInputQueueClosed() {
+			return false
+		}
+		inst.setTerminalError(fmt.Errorf("failed to dispatch chunk retry %s at %s", key, stage))
 		return false
 	}
 

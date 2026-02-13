@@ -5,6 +5,7 @@ import "SophonClientv2/internal/logging"
 func (inst *Installer) Start() {
 	logging.GlobalLogger.Info("Starting installation pipeline")
 
+	inst.DispatchChunkRetries()
 	inst.EnqueueChunks()
 	inst.DownloadChunks()
 	inst.DecompressChunks()
