@@ -5,6 +5,15 @@ import (
 	"fmt"
 )
 
+type fileChunkInstance struct {
+	Chunk  *ChunkMetaData
+	Offset uint64
+}
+
+func chunkInstanceKey(chunkID string, offset uint64) string {
+	return fmt.Sprintf("%s:%d", chunkID, offset)
+}
+
 func (inst *Installer) closeInputQueue() {
 	inst.inputQueueCloseOnce.Do(func() {
 		close(inst.InputQueue)
@@ -87,6 +96,54 @@ func (inst *Installer) markFileCompleted(filePath string) (bool, int) {
 
 	inst.completedFiles[filePath] = struct{}{}
 	return true, len(inst.completedFiles)
+}
+
+func (inst *Installer) fileChunkInstances(fileMeta *FileMetaData) ([]fileChunkInstance, error) {
+	if fileMeta == nil {
+		return nil, fmt.Errorf("nil file metadata while resolving chunk instances")
+	}
+	if fileMeta.FilePath == "" {
+		return nil, fmt.Errorf("empty file path while resolving chunk instances")
+	}
+
+	instances := make([]fileChunkInstance, 0, len(fileMeta.Chunks))
+	seen := make(map[string]struct{}, len(fileMeta.Chunks))
+
+	for _, chunkID := range fileMeta.Chunks {
+		chunkMeta, ok := inst.ChunkMap[chunkID]
+		if !ok {
+			return nil, fmt.Errorf("chunk metadata not found for %s (%s)", fileMeta.FilePath, chunkID)
+		}
+
+		foundDestination := false
+		for _, dest := range chunkMeta.Destinations {
+			if dest.File == nil || dest.File.FilePath != fileMeta.FilePath {
+				continue
+			}
+
+			foundDestination = true
+			key := chunkInstanceKey(chunkID, dest.Offset)
+			if _, exists := seen[key]; exists {
+				continue
+			}
+
+			seen[key] = struct{}{}
+			instances = append(instances, fileChunkInstance{
+				Chunk:  chunkMeta,
+				Offset: dest.Offset,
+			})
+		}
+
+		if !foundDestination {
+			return nil, fmt.Errorf("destination not found for file %s in chunk %s", fileMeta.FilePath, chunkID)
+		}
+	}
+
+	if len(fileMeta.Chunks) > 0 && len(instances) == 0 {
+		return nil, fmt.Errorf("no chunk instances resolved for file %s", fileMeta.FilePath)
+	}
+
+	return instances, nil
 }
 
 func (inst *Installer) chunkPayload(payload any, stage string) (*ChunkMetaData, bool) {

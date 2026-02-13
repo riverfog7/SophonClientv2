@@ -215,8 +215,8 @@ func (inst *Installer) VerifyFiles() {
 		// Track which chunk instances (chunkID+offset) have been assembled for each file
 		// Key: filePath, Value: map of "chunkID:offset" -> bool
 		fileAssembledChunks := make(map[string]map[string]bool)
-		// Cache expected chunk count per file to avoid recomputing
-		fileExpectedChunks := make(map[string]int)
+		// Cache expected chunk instance count per file to avoid recomputing
+		fileExpectedChunkInstances := make(map[string]int)
 
 		for assemblerOutput := range inst.Assembler.GetOutputChannel() {
 			cm, ok := inst.chunkPayload(assemblerOutput.Payload, "assembler-output")
@@ -263,25 +263,29 @@ func (inst *Installer) VerifyFiles() {
 				continue
 			}
 
-			// Compute expected chunk count only once per file
-			if _, exists := fileExpectedChunks[filePath]; !exists {
-				chunkSet := make(map[string]bool)
-				for _, chunkID := range fileMeta.Chunks {
-					chunkSet[chunkID] = true
+			if _, exists := fileExpectedChunkInstances[filePath]; !exists {
+				instances, err := inst.fileChunkInstances(fileMeta)
+				if err != nil {
+					inst.setTerminalError(err)
+					continue
 				}
-				fileExpectedChunks[filePath] = len(chunkSet)
+				fileExpectedChunkInstances[filePath] = len(instances)
 			}
 
 			// Create a unique key for this chunk instance (chunkID:offset)
-			chunkInstanceKey := fmt.Sprintf("%s:%d", cm.ChunkID, offset)
-			fileAssembledChunks[filePath][chunkInstanceKey] = true
+			instanceKey := chunkInstanceKey(cm.ChunkID, offset)
+			fileAssembledChunks[filePath][instanceKey] = true
 
-			expectedChunkInstances := fileExpectedChunks[filePath]
+			expectedChunkInstances := fileExpectedChunkInstances[filePath]
+			if expectedChunkInstances == 0 {
+				inst.setTerminalError(fmt.Errorf("expected chunk instance count is zero for file %s", filePath))
+				continue
+			}
 			logging.GlobalLogger.Debug(fmt.Sprintf("File %s: Assembled Chunks: %d, Expected Chunk Instances: %d", filePath, len(fileAssembledChunks[filePath]), expectedChunkInstances))
 			if len(fileAssembledChunks[filePath]) == expectedChunkInstances {
 				if !inst.tryMarkFileVerifyInFlight(filePath) {
 					delete(fileAssembledChunks, filePath)
-					delete(fileExpectedChunks, filePath)
+					delete(fileExpectedChunkInstances, filePath)
 					continue
 				}
 
@@ -294,7 +298,7 @@ func (inst *Installer) VerifyFiles() {
 					inst.clearFileVerifyInFlight(filePath)
 
 					delete(fileAssembledChunks, filePath)
-					delete(fileExpectedChunks, filePath)
+					delete(fileExpectedChunkInstances, filePath)
 
 					if removeErr := os.Remove(stagingPath); removeErr != nil && !os.IsNotExist(removeErr) {
 						logging.GlobalLogger.Warn(fmt.Sprintf("Failed to remove corrupted staging file %s: %v", stagingPath, removeErr))
@@ -304,41 +308,27 @@ func (inst *Installer) VerifyFiles() {
 						continue
 					}
 
-					for _, chunkID := range fileMeta.Chunks {
-						chunkMeta, ok := inst.ChunkMap[chunkID]
-						if !ok {
-							inst.setTerminalError(fmt.Errorf("chunk metadata not found for %s (%s)", fileMeta.FilePath, chunkID))
-							break
-						}
+					instances, err := inst.fileChunkInstances(fileMeta)
+					if err != nil {
+						inst.setTerminalError(err)
+						continue
+					}
 
-						var offset uint64
-						var found bool
-						for _, d := range chunkMeta.Destinations {
-							if d.File == fileMeta {
-								offset = d.Offset
-								found = true
-								break
-							}
-						}
-						if !found {
-							inst.setTerminalError(fmt.Errorf("offset not found for file %s in chunk %s", fileMeta.FilePath, chunkID))
-							break
-						}
-
-						cm_new := &ChunkMetaData{
-							ChunkID:          chunkMeta.ChunkID,
-							URL:              chunkMeta.URL,
-							MD5:              chunkMeta.MD5,
-							CompressedSize:   chunkMeta.CompressedSize,
-							UncompressedSize: chunkMeta.UncompressedSize,
-							IsCompressed:     chunkMeta.IsCompressed,
+					for _, instance := range instances {
+						cmNew := &ChunkMetaData{
+							ChunkID:          instance.Chunk.ChunkID,
+							URL:              instance.Chunk.URL,
+							MD5:              instance.Chunk.MD5,
+							CompressedSize:   instance.Chunk.CompressedSize,
+							UncompressedSize: instance.Chunk.UncompressedSize,
+							IsCompressed:     instance.Chunk.IsCompressed,
 							Destinations: []ChunkDestination{
-								{File: fileMeta, Offset: offset},
+								{File: fileMeta, Offset: instance.Offset},
 							},
 						}
 
-						if inst.tryRequeueChunk(cm_new, "verify-file-open") {
-							inst.Progress.IncrementTotalBytes(int64(chunkMeta.CompressedSize))
+						if inst.tryRequeueChunk(cmNew, "verify-file-open") {
+							inst.Progress.IncrementTotalBytes(int64(instance.Chunk.CompressedSize))
 						}
 						if inst.hasTerminalError() {
 							break
@@ -350,7 +340,7 @@ func (inst *Installer) VerifyFiles() {
 				inst.Verifier2.EnqueueVerification(filePath, f, fileMeta.MD5, fileMeta)
 
 				delete(fileAssembledChunks, filePath)
-				delete(fileExpectedChunks, filePath)
+				delete(fileExpectedChunkInstances, filePath)
 			}
 		}
 		logging.GlobalLogger.Info("Assembler output closed, stopping File Verifier")
@@ -396,41 +386,27 @@ func (inst *Installer) MoveFiles() {
 					logging.GlobalLogger.Warn(fmt.Sprintf("Failed to remove corrupted staging file %s: %v", stagingPath, removeErr))
 				}
 
-				for _, chunkID := range fm.Chunks {
-					cm, ok := inst.ChunkMap[chunkID]
-					if !ok {
-						inst.setTerminalError(fmt.Errorf("chunk metadata not found for %s (%s)", fm.FilePath, chunkID))
-						break
-					}
+				instances, err := inst.fileChunkInstances(fm)
+				if err != nil {
+					inst.setTerminalError(err)
+					continue
+				}
 
-					var offset uint64
-					var offsetFound bool
-					for _, dest := range cm.Destinations {
-						if dest.File == fm {
-							offset = dest.Offset
-							offsetFound = true
-							break
-						}
-					}
-					if !offsetFound {
-						inst.setTerminalError(fmt.Errorf("offset not found for file %s in chunk %s", fm.FilePath, chunkID))
-						break
-					}
-
-					new_cm := &ChunkMetaData{
-						ChunkID:          cm.ChunkID,
-						URL:              cm.URL,
-						MD5:              cm.MD5,
-						CompressedSize:   cm.CompressedSize,
-						UncompressedSize: cm.UncompressedSize,
-						IsCompressed:     cm.IsCompressed,
+				for _, instance := range instances {
+					newCM := &ChunkMetaData{
+						ChunkID:          instance.Chunk.ChunkID,
+						URL:              instance.Chunk.URL,
+						MD5:              instance.Chunk.MD5,
+						CompressedSize:   instance.Chunk.CompressedSize,
+						UncompressedSize: instance.Chunk.UncompressedSize,
+						IsCompressed:     instance.Chunk.IsCompressed,
 						Destinations: []ChunkDestination{
-							{File: fm, Offset: offset},
+							{File: fm, Offset: instance.Offset},
 						},
 					}
 
-					if inst.tryRequeueChunk(new_cm, "file-verify") {
-						inst.Progress.IncrementTotalBytes(int64(cm.CompressedSize))
+					if inst.tryRequeueChunk(newCM, "file-verify") {
+						inst.Progress.IncrementTotalBytes(int64(instance.Chunk.CompressedSize))
 					}
 					if inst.hasTerminalError() {
 						break
