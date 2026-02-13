@@ -32,4 +32,7 @@ type Downloader struct {
 	OutputQueue chan DownloaderOutput
 	Workers     []*DownloaderWorker
 	wg          *sync.WaitGroup
+
+	statusStopCh chan struct{}
+	stopOnce     sync.Once
 }

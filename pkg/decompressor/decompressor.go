@@ -62,11 +62,12 @@ func NewDecompressor(buffSize int) *Decompressor {
 	}
 
 	decompressor := &Decompressor{
-		ThreadCount: threadCount,
-		InputQueue:  inputQueue,
-		OutputQueue: outputQueue,
-		Workers:     workers,
-		wg:          wg,
+		ThreadCount:  threadCount,
+		InputQueue:   inputQueue,
+		OutputQueue:  outputQueue,
+		Workers:      workers,
+		wg:           wg,
+		statusStopCh: make(chan struct{}),
 	}
 	decompressor.StartPrintChannelStatus(config.Config.QueueLengthPrintInterval)
 	return decompressor
@@ -74,12 +75,15 @@ func NewDecompressor(buffSize int) *Decompressor {
 
 func (d *Decompressor) StartPrintChannelStatus(intervalSeconds int) {
 	go func() {
+		ticker := time.NewTicker(time.Duration(intervalSeconds) * time.Second)
+		defer ticker.Stop()
 		for {
-			if d.wg == nil {
+			select {
+			case <-d.statusStopCh:
 				return
+			case <-ticker.C:
+				d.PrintChannelStatus()
 			}
-			d.PrintChannelStatus()
-			<-time.After(time.Duration(intervalSeconds) * time.Second)
 		}
 	}()
 }
@@ -90,11 +94,13 @@ func (d *Decompressor) PrintChannelStatus() {
 }
 
 func (d *Decompressor) Stop() {
-	close(d.InputQueue)
-	d.wg.Wait()
-	d.wg = nil
-	close(d.OutputQueue)
-	logging.GlobalLogger.Info("Decompressor stopped")
+	d.stopOnce.Do(func() {
+		close(d.statusStopCh)
+		close(d.InputQueue)
+		d.wg.Wait()
+		close(d.OutputQueue)
+		logging.GlobalLogger.Info("Decompressor stopped")
+	})
 }
 
 func (d *Decompressor) EnqueueDecompression(content io.ReadCloser, payload any) {

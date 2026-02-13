@@ -25,4 +25,7 @@ type Assembler struct {
 	InputQueue  chan AssemblerInput
 	OutputQueue chan AssemblerOutput
 	wg          *sync.WaitGroup
+
+	statusStopCh chan struct{}
+	stopOnce     sync.Once
 }

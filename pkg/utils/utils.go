@@ -7,12 +7,16 @@ import (
 )
 
 func NonBlockingEnqueue[T any](ch chan<- T, item T) {
+	defer func() {
+		if r := recover(); r != nil {
+			logging.GlobalLogger.Debug(fmt.Sprintf("Queue send skipped: %v", r))
+		}
+	}()
+
 	select {
 	case ch <- item:
 	default:
-		go func() {
-			ch <- item
-		}()
+		ch <- item
 	}
 }
 

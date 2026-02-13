@@ -31,6 +31,9 @@ type Decompressor struct {
 	OutputQueue chan DecompressorOutput
 	Workers     []*DecompressorWorker
 	wg          *sync.WaitGroup
+
+	statusStopCh chan struct{}
+	stopOnce     sync.Once
 }
 
 type zstdReadCloser struct {

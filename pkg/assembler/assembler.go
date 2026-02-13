@@ -19,10 +19,11 @@ func NewAssembler(stagingDir string, buffSize int) *Assembler {
 	wg := &sync.WaitGroup{}
 
 	asm := &Assembler{
-		StagingDir:  stagingDir,
-		InputQueue:  inputQueue,
-		OutputQueue: outputQueue,
-		wg:          wg,
+		StagingDir:   stagingDir,
+		InputQueue:   inputQueue,
+		OutputQueue:  outputQueue,
+		wg:           wg,
+		statusStopCh: make(chan struct{}),
 	}
 
 	asm.Start() // Not multi threaded
@@ -33,12 +34,15 @@ func NewAssembler(stagingDir string, buffSize int) *Assembler {
 
 func (a *Assembler) StartPrintChannelStatus(intervalSeconds int) {
 	go func() {
+		ticker := time.NewTicker(time.Duration(intervalSeconds) * time.Second)
+		defer ticker.Stop()
 		for {
-			if a.wg == nil {
+			select {
+			case <-a.statusStopCh:
 				return
+			case <-ticker.C:
+				a.PrintChannelStatus()
 			}
-			a.PrintChannelStatus()
-			<-time.After(time.Duration(intervalSeconds) * time.Second)
 		}
 	}()
 }
@@ -96,11 +100,13 @@ func (a *Assembler) Start() {
 }
 
 func (a *Assembler) Stop() {
-	close(a.InputQueue)
-	a.wg.Wait()
-	a.wg = nil
-	close(a.OutputQueue)
-	logging.GlobalLogger.Info("Assembler stopped")
+	a.stopOnce.Do(func() {
+		close(a.statusStopCh)
+		close(a.InputQueue)
+		a.wg.Wait()
+		close(a.OutputQueue)
+		logging.GlobalLogger.Info("Assembler stopped")
+	})
 }
 
 func (a *Assembler) EnqueueWrite(filePath string, offset uint64, chunkID string, content io.ReadCloser, payload any) {

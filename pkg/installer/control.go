@@ -17,21 +17,20 @@ func (inst *Installer) Start() {
 }
 
 func (inst *Installer) Stop() {
-	logging.GlobalLogger.Info("Stopping installation pipeline")
-	defer func() {
-		if r := recover(); r != nil {
-		}
-	}()
-	close(inst.InputQueue)
+	inst.stopOnce.Do(func() {
+		logging.GlobalLogger.Info("Stopping installation pipeline")
 
-	inst.Downloader.Stop()
-	inst.Decompressor.Stop()
-	inst.Verifier.Stop()
-	inst.Assembler.Stop()
-	inst.Verifier2.Stop()
+		inst.closeInputQueue()
 
-	inst.wg.Wait()
-	logging.GlobalLogger.Info("Installation pipeline stopped")
+		inst.Downloader.Stop()
+		inst.Decompressor.Stop()
+		inst.Verifier.Stop()
+		inst.Assembler.Stop()
+		inst.Verifier2.Stop()
+
+		inst.wg.Wait()
+		logging.GlobalLogger.Info("Installation pipeline stopped")
+	})
 }
 
 func (inst *Installer) Wait() {

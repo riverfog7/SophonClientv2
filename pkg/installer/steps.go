@@ -21,7 +21,7 @@ func (inst *Installer) EnqueueChunks() {
 
 	if len(orderedChunks) == 0 {
 		logging.GlobalLogger.Info("No chunks to download, nothing to enqueue")
-		close(inst.InputQueue)
+		inst.closeInputQueue()
 		return
 	}
 
@@ -350,7 +350,7 @@ func (inst *Installer) MoveFiles() {
 
 			if verifiedFiles >= totalFiles {
 				logging.GlobalLogger.Info("All files verified and moved, closing InputQueue to shut down pipeline")
-				close(inst.InputQueue)
+				inst.closeInputQueue()
 			}
 		}
 		logging.GlobalLogger.Info("File Verifier output closed, file move complete")

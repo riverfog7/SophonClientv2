@@ -97,12 +97,13 @@ func NewDownloader(buffSize int) *Downloader {
 	}
 
 	downloader := &Downloader{
-		ThreadCount: threadCount,
-		HttpClient:  httpClient,
-		InputQueue:  inputQueue,
-		OutputQueue: outputQueue,
-		Workers:     workers,
-		wg:          wg,
+		ThreadCount:  threadCount,
+		HttpClient:   httpClient,
+		InputQueue:   inputQueue,
+		OutputQueue:  outputQueue,
+		Workers:      workers,
+		wg:           wg,
+		statusStopCh: make(chan struct{}),
 	}
 	downloader.StartPrintChannelStatus(config.Config.QueueLengthPrintInterval)
 	return downloader
@@ -110,12 +111,15 @@ func NewDownloader(buffSize int) *Downloader {
 
 func (d *Downloader) StartPrintChannelStatus(intervalSeconds int) {
 	go func() {
+		ticker := time.NewTicker(time.Duration(intervalSeconds) * time.Second)
+		defer ticker.Stop()
 		for {
-			if d.wg == nil {
+			select {
+			case <-d.statusStopCh:
 				return
+			case <-ticker.C:
+				d.PrintChannelStatus()
 			}
-			d.PrintChannelStatus()
-			<-time.After(time.Duration(intervalSeconds) * time.Second)
 		}
 	}()
 }
@@ -126,11 +130,13 @@ func (d *Downloader) PrintChannelStatus() {
 }
 
 func (d *Downloader) Stop() {
-	close(d.InputQueue)
-	d.wg.Wait()
-	d.wg = nil
-	close(d.OutputQueue)
-	logging.GlobalLogger.Info("Downloader stopped")
+	d.stopOnce.Do(func() {
+		close(d.statusStopCh)
+		close(d.InputQueue)
+		d.wg.Wait()
+		close(d.OutputQueue)
+		logging.GlobalLogger.Info("Downloader stopped")
+	})
 }
 
 func (d *Downloader) EnqueueDownload(url string, payload any) {

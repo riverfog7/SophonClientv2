@@ -33,4 +33,7 @@ type Verifier struct {
 	OutputQueue   chan VerifierOutput
 	Workers       []*VerifierWorker
 	wg            *sync.WaitGroup
+
+	statusStopCh chan struct{}
+	stopOnce     sync.Once
 }

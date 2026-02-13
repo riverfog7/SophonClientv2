@@ -71,4 +71,7 @@ type Installer struct {
 	Verifier2    *verifier.Verifier // For file verification
 
 	wg sync.WaitGroup
+
+	inputQueueCloseOnce sync.Once
+	stopOnce            sync.Once
 }

@@ -109,6 +109,7 @@ func NewVerifier(buffSize int, returnContent bool) *Verifier {
 		OutputQueue:   outputQueue,
 		Workers:       workers,
 		wg:            wg,
+		statusStopCh:  make(chan struct{}),
 	}
 	verifier.StartPrintChannelStatus(config.Config.QueueLengthPrintInterval)
 	return verifier
@@ -116,12 +117,15 @@ func NewVerifier(buffSize int, returnContent bool) *Verifier {
 
 func (v *Verifier) StartPrintChannelStatus(intervalSeconds int) {
 	go func() {
+		ticker := time.NewTicker(time.Duration(intervalSeconds) * time.Second)
+		defer ticker.Stop()
 		for {
-			if v.wg == nil {
+			select {
+			case <-v.statusStopCh:
 				return
+			case <-ticker.C:
+				v.PrintChannelStatus()
 			}
-			v.PrintChannelStatus()
-			<-time.After(time.Duration(intervalSeconds) * time.Second)
 		}
 	}()
 }
@@ -132,11 +136,13 @@ func (v *Verifier) PrintChannelStatus() {
 }
 
 func (v *Verifier) Stop() {
-	close(v.InputQueue)
-	v.wg.Wait()
-	v.wg = nil
-	close(v.OutputQueue)
-	logging.GlobalLogger.Info("Verifier stopped")
+	v.stopOnce.Do(func() {
+		close(v.statusStopCh)
+		close(v.InputQueue)
+		v.wg.Wait()
+		close(v.OutputQueue)
+		logging.GlobalLogger.Info("Verifier stopped")
+	})
 }
 
 func (v *Verifier) EnqueueVerification(name string, content io.ReadCloser, expectedMD5 string, payload any) {
