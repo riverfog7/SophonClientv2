@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sort"
 	"sync"
+	"time"
 )
 
 func (inst *Installer) ParseManifest(mani *models.Manifest, chunkDownload models.SophonChunkDownloadInfo) error {
@@ -28,16 +29,34 @@ func (inst *Installer) ParseManifest(mani *models.Manifest, chunkDownload models
 	inst.inputQueueStateMu.Lock()
 	inst.inputQueueClosed = false
 	inst.inputQueueStateMu.Unlock()
+	inst.retrySatMu.Lock()
+	inst.retrySatSince = time.Time{}
+	inst.retrySatWarned = false
+	inst.retrySatMu.Unlock()
 
 	for {
 		select {
 		case <-inst.retryDispatchQueue:
 		default:
-			goto retryQueueDrained
+			goto retryDispatchQueueDrained
 		}
 	}
 
-retryQueueDrained:
+retryDispatchQueueDrained:
+
+	for {
+		select {
+		case <-inst.retryOverflowQueue:
+		default:
+			goto retryOverflowQueueDrained
+		}
+	}
+
+retryOverflowQueueDrained:
+
+	inst.retryOverflowBufferMu.Lock()
+	inst.retryOverflowBuffer = nil
+	inst.retryOverflowBufferMu.Unlock()
 
 	for _, fi := range mani.GetFiles() {
 		filePath := fi.GetFilename()

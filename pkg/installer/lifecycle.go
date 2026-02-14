@@ -1,8 +1,11 @@
 package installer
 
 import (
+	"SophonClientv2/internal/config"
 	"SophonClientv2/internal/logging"
 	"fmt"
+	"math/rand"
+	"time"
 )
 
 type fileChunkInstance struct {
@@ -29,7 +32,94 @@ func (inst *Installer) isInputQueueClosed() bool {
 	return inst.inputQueueClosed
 }
 
-func (inst *Installer) enqueueRetryDispatch(cm *ChunkMetaData, stage string) (ok bool) {
+func retryDelay(attempt, baseMs, maxMs, jitterMs int) time.Duration {
+	if attempt < 1 || baseMs <= 0 {
+		return 0
+	}
+
+	delayMs := baseMs
+	if maxMs > 0 {
+		for i := 1; i < attempt; i++ {
+			if delayMs >= maxMs {
+				break
+			}
+			delayMs *= 2
+			if delayMs > maxMs {
+				delayMs = maxMs
+				break
+			}
+		}
+	}
+
+	if jitterMs > 0 {
+		delayMs += rand.Intn(jitterMs + 1)
+	}
+
+	return time.Duration(delayMs) * time.Millisecond
+}
+
+func (inst *Installer) retryOverflowBufferLen() int {
+	inst.retryOverflowBufferMu.Lock()
+	defer inst.retryOverflowBufferMu.Unlock()
+	return len(inst.retryOverflowBuffer)
+}
+
+func (inst *Installer) pushRetryOverflowBuffer(input retryDispatchInput) int {
+	inst.retryOverflowBufferMu.Lock()
+	inst.retryOverflowBuffer = append(inst.retryOverflowBuffer, input)
+	length := len(inst.retryOverflowBuffer)
+	inst.retryOverflowBufferMu.Unlock()
+	return length
+}
+
+func (inst *Installer) popRetryOverflowBuffer() (retryDispatchInput, bool) {
+	inst.retryOverflowBufferMu.Lock()
+	defer inst.retryOverflowBufferMu.Unlock()
+
+	count := len(inst.retryOverflowBuffer)
+	if count == 0 {
+		return retryDispatchInput{}, false
+	}
+
+	input := inst.retryOverflowBuffer[count-1]
+	inst.retryOverflowBuffer = inst.retryOverflowBuffer[:count-1]
+	return input, true
+}
+
+func (inst *Installer) clearRetrySaturation() {
+	inst.retrySatMu.Lock()
+	if !inst.retrySatSince.IsZero() {
+		elapsed := time.Since(inst.retrySatSince)
+		logging.GlobalLogger.Info(fmt.Sprintf("Retry saturation cleared after %s", elapsed.Truncate(time.Millisecond)))
+	}
+	inst.retrySatSince = time.Time{}
+	inst.retrySatWarned = false
+	inst.retrySatMu.Unlock()
+}
+
+func (inst *Installer) markRetrySaturation(stage string, buffered int) time.Duration {
+	inst.retrySatMu.Lock()
+	defer inst.retrySatMu.Unlock()
+
+	if inst.retrySatSince.IsZero() {
+		inst.retrySatSince = time.Now()
+	}
+
+	if !inst.retrySatWarned {
+		logging.GlobalLogger.Warn(fmt.Sprintf(
+			"Retry saturation started at %s (dispatch=%d/%d overflow=%d/%d buffered=%d)",
+			stage,
+			len(inst.retryDispatchQueue), cap(inst.retryDispatchQueue),
+			len(inst.retryOverflowQueue), cap(inst.retryOverflowQueue),
+			buffered,
+		))
+		inst.retrySatWarned = true
+	}
+
+	return time.Since(inst.retrySatSince)
+}
+
+func (inst *Installer) enqueueRetryDispatch(cm *ChunkMetaData, stage string, attempt int) (ok bool) {
 	if cm == nil {
 		inst.setTerminalError(fmt.Errorf("nil chunk metadata for retry dispatch at %s", stage))
 		return false
@@ -44,13 +134,39 @@ func (inst *Installer) enqueueRetryDispatch(cm *ChunkMetaData, stage string) (ok
 		}
 	}()
 
+	input := retryDispatchInput{Metadata: cm, Stage: stage, Attempt: attempt}
+
 	select {
-	case inst.retryDispatchQueue <- retryDispatchInput{Metadata: cm, Stage: stage}:
+	case inst.retryDispatchQueue <- input:
+		inst.clearRetrySaturation()
 		return true
 	default:
-		inst.setTerminalError(fmt.Errorf("retry dispatch queue saturated at %s", stage))
-		return false
 	}
+
+	select {
+	case inst.retryOverflowQueue <- input:
+		inst.clearRetrySaturation()
+		return true
+	default:
+	}
+
+	buffered := inst.pushRetryOverflowBuffer(input)
+	limit := config.Config.RetryOverflowBufferLimit
+	if limit > 0 && buffered > limit {
+		elapsed := inst.markRetrySaturation(stage, buffered)
+		grace := time.Duration(config.Config.RetrySaturationGraceMs) * time.Millisecond
+		if grace <= 0 {
+			grace = 15 * time.Second
+		}
+		if elapsed >= grace {
+			inst.setTerminalError(fmt.Errorf("retry saturation exceeded grace at %s (buffered=%d, limit=%d, elapsed=%s)", stage, buffered, limit, elapsed.Truncate(time.Millisecond)))
+			return false
+		}
+	} else {
+		inst.clearRetrySaturation()
+	}
+
+	return true
 }
 
 func (inst *Installer) setTerminalError(err error) {
@@ -243,14 +359,11 @@ func (inst *Installer) tryRequeueChunk(cm *ChunkMetaData, stage string) bool {
 		inst.setTerminalError(fmt.Errorf("chunk retry limit reached for %s at %s", key, stage))
 		return false
 	}
-	inst.chunkRetryCounts[key] = count + 1
+	attempt := count + 1
+	inst.chunkRetryCounts[key] = attempt
 	inst.retryMu.Unlock()
 
-	if !inst.enqueueRetryDispatch(cm, stage) {
-		if inst.hasTerminalError() || inst.isInputQueueClosed() {
-			return false
-		}
-		inst.setTerminalError(fmt.Errorf("failed to dispatch chunk retry %s at %s", key, stage))
+	if !inst.enqueueRetryDispatch(cm, stage, attempt) {
 		return false
 	}
 

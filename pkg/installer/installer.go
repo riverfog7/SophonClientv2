@@ -9,9 +9,17 @@ import (
 )
 
 func NewInstaller(gameDir, stagingDir string, queueSize int) *Installer {
-	retryDispatchSize := queueSize * 64
-	if retryDispatchSize < 2048 {
-		retryDispatchSize = 2048
+	retryDispatchSize := config.Config.RetryDispatchQueueSize
+	if retryDispatchSize <= 0 {
+		retryDispatchSize = queueSize * 8
+		if retryDispatchSize < 128 {
+			retryDispatchSize = 128
+		}
+	}
+
+	retryOverflowSize := config.Config.RetryOverflowQueueSize
+	if retryOverflowSize <= 0 {
+		retryOverflowSize = retryDispatchSize * 4
 	}
 
 	return &Installer{
@@ -24,6 +32,7 @@ func NewInstaller(gameDir, stagingDir string, queueSize int) *Installer {
 
 		InputQueue:         make(chan ChunksInput, queueSize),
 		retryDispatchQueue: make(chan retryDispatchInput, retryDispatchSize),
+		retryOverflowQueue: make(chan retryDispatchInput, retryOverflowSize),
 
 		Downloader:   downloader.NewDownloader(config.Config.DownloadChanSize),
 		Decompressor: decompressor.NewDecompressor(config.Config.DecompressChanSize),

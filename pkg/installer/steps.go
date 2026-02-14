@@ -1,6 +1,7 @@
 package installer
 
 import (
+	"SophonClientv2/internal/config"
 	"SophonClientv2/internal/logging"
 	"SophonClientv2/pkg/utils"
 	"bytes"
@@ -68,30 +69,71 @@ func (inst *Installer) DownloadChunks() {
 }
 
 func (inst *Installer) DispatchChunkRetries() {
-	logging.GlobalLogger.Info("Starting chunk retry dispatcher")
+	workerCount := config.Config.RetryDispatchWorkers
+	if workerCount < 1 {
+		workerCount = 1
+	}
+	logging.GlobalLogger.Info(fmt.Sprintf("Starting chunk retry dispatcher with %d workers", workerCount))
 
-	inst.wg.Add(1)
-	go func() {
-		defer inst.wg.Done()
+	for i := 0; i < workerCount; i++ {
+		inst.wg.Add(1)
+		go func(workerID int) {
+			defer inst.wg.Done()
 
-		ticker := time.NewTicker(10 * time.Millisecond)
-		defer ticker.Stop()
+			idleTicker := time.NewTicker(15 * time.Millisecond)
+			defer idleTicker.Stop()
 
-		for {
-			if inst.hasTerminalError() {
-				return
-			}
+			for {
+				if inst.hasTerminalError() {
+					return
+				}
 
-			if inst.isInputQueueClosed() && len(inst.retryDispatchQueue) == 0 {
-				logging.GlobalLogger.Info("Retry dispatcher exiting: input queue closed and retry queue drained")
-				return
-			}
+				if inst.isInputQueueClosed() && len(inst.retryDispatchQueue) == 0 && len(inst.retryOverflowQueue) == 0 && inst.retryOverflowBufferLen() == 0 {
+					logging.GlobalLogger.Info(fmt.Sprintf("Retry dispatcher worker %d exiting: queues drained", workerID))
+					return
+				}
 
-			select {
-			case retry := <-inst.retryDispatchQueue:
+				retry, ok := inst.popRetryOverflowBuffer()
+				if !ok {
+					select {
+					case retry = <-inst.retryOverflowQueue:
+						ok = true
+					default:
+					}
+				}
+
+				if !ok {
+					select {
+					case retry = <-inst.retryDispatchQueue:
+						ok = true
+					case retry = <-inst.retryOverflowQueue:
+						ok = true
+					case <-idleTicker.C:
+					}
+				}
+
+				if !ok {
+					continue
+				}
+
 				if retry.Metadata == nil {
 					inst.setTerminalError(fmt.Errorf("nil chunk metadata received in retry dispatcher from %s", retry.Stage))
 					continue
+				}
+
+				if inst.hasTerminalError() || inst.isInputQueueClosed() {
+					continue
+				}
+
+				delay := retryDelay(
+					retry.Attempt,
+					config.Config.PipelineRetryBaseDelayMs,
+					config.Config.PipelineRetryMaxDelayMs,
+					config.Config.PipelineRetryJitterMs,
+				)
+				if delay > 0 {
+					timer := time.NewTimer(delay)
+					<-timer.C
 				}
 
 				if inst.hasTerminalError() || inst.isInputQueueClosed() {
@@ -104,10 +146,9 @@ func (inst *Installer) DispatchChunkRetries() {
 					}
 					inst.setTerminalError(fmt.Errorf("failed to enqueue retry chunk %s from %s", retry.Metadata.ChunkID, retry.Stage))
 				}
-			case <-ticker.C:
 			}
-		}
-	}()
+		}(i)
+	}
 }
 
 func (inst *Installer) DecompressChunks() {

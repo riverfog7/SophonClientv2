@@ -21,6 +21,20 @@ type SophonClientConfig struct {
 	MaxChunkPipelineRetries    int
 	MaxFileRebuildRetries      int
 
+	DownloaderRetryBaseDelayMs int
+	DownloaderRetryMaxDelayMs  int
+	DownloaderRetryJitterMs    int
+
+	PipelineRetryBaseDelayMs int
+	PipelineRetryMaxDelayMs  int
+	PipelineRetryJitterMs    int
+
+	RetryDispatchWorkers     int
+	RetryDispatchQueueSize   int
+	RetryOverflowQueueSize   int
+	RetryOverflowBufferLimit int
+	RetrySaturationGraceMs   int
+
 	DownloadChanSize   int
 	VerifyChanSize     int
 	DecompressChanSize int
@@ -42,6 +56,20 @@ func NewSophonClientConfig() SophonClientConfig {
 		MaxChunkDownloadRetries:    5,
 		MaxChunkPipelineRetries:    6,
 		MaxFileRebuildRetries:      2,
+
+		DownloaderRetryBaseDelayMs: 250,
+		DownloaderRetryMaxDelayMs:  5000,
+		DownloaderRetryJitterMs:    120,
+
+		PipelineRetryBaseDelayMs: 150,
+		PipelineRetryMaxDelayMs:  4000,
+		PipelineRetryJitterMs:    100,
+
+		RetryDispatchWorkers:     4,
+		RetryDispatchQueueSize:   512,
+		RetryOverflowQueueSize:   2048,
+		RetryOverflowBufferLimit: 16384,
+		RetrySaturationGraceMs:   15000,
 
 		DownloadChanSize:   32,
 		VerifyChanSize:     32,

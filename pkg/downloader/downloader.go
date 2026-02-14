@@ -6,11 +6,39 @@ import (
 	"SophonClientv2/pkg/utils"
 	"bytes"
 	"io"
+	"math/rand"
 	"net/http"
 	"strconv"
 	"sync"
 	"time"
 )
+
+func downloaderRetryDelay(attempt int) time.Duration {
+	if attempt < 1 || config.Config.DownloaderRetryBaseDelayMs <= 0 {
+		return 0
+	}
+
+	delayMs := config.Config.DownloaderRetryBaseDelayMs
+	maxMs := config.Config.DownloaderRetryMaxDelayMs
+	if maxMs > 0 {
+		for i := 1; i < attempt; i++ {
+			if delayMs >= maxMs {
+				break
+			}
+			delayMs *= 2
+			if delayMs > maxMs {
+				delayMs = maxMs
+				break
+			}
+		}
+	}
+
+	if config.Config.DownloaderRetryJitterMs > 0 {
+		delayMs += rand.Intn(config.Config.DownloaderRetryJitterMs + 1)
+	}
+
+	return time.Duration(delayMs) * time.Millisecond
+}
 
 func NewWorker(id int, httpClient *http.Client, inputQueue chan DownloaderInput, outputQueue chan DownloaderOutput, wg *sync.WaitGroup) *DownloaderWorker {
 	return &DownloaderWorker{
@@ -35,6 +63,7 @@ func (worker *DownloaderWorker) Start() {
 				if err != nil {
 					if attempt < maxRetries {
 						logging.GlobalLogger.Warn("Worker " + strconv.Itoa(worker.Id) + ": Failed to download chunk, retrying... (attempt " + strconv.Itoa(attempt) + ")")
+						time.Sleep(downloaderRetryDelay(attempt))
 						continue
 					}
 					logging.GlobalLogger.Error("Worker " + strconv.Itoa(worker.Id) + ": Failed to download chunk from " + input.Url + ": " + err.Error())
@@ -46,6 +75,7 @@ func (worker *DownloaderWorker) Start() {
 					utils.DrainAndClose(resp.Body)
 					if attempt < maxRetries {
 						logging.GlobalLogger.Warn("Worker " + strconv.Itoa(worker.Id) + ": Failed to download chunk with status " + resp.Status + ", retrying... (attempt " + strconv.Itoa(attempt) + ")")
+						time.Sleep(downloaderRetryDelay(attempt))
 						continue
 					}
 					logging.GlobalLogger.Error("Worker " + strconv.Itoa(worker.Id) + ": Failed to download chunk from " + input.Url + " with status " + resp.Status)
@@ -58,6 +88,7 @@ func (worker *DownloaderWorker) Start() {
 				if readErr != nil {
 					if attempt < maxRetries {
 						logging.GlobalLogger.Warn("Worker " + strconv.Itoa(worker.Id) + ": Failed to read chunk body, retrying... (attempt " + strconv.Itoa(attempt) + ")")
+						time.Sleep(downloaderRetryDelay(attempt))
 						continue
 					}
 					logging.GlobalLogger.Error("Worker " + strconv.Itoa(worker.Id) + ": Error reading response body from " + input.Url + ": " + readErr.Error())

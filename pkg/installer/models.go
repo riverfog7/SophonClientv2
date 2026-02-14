@@ -6,6 +6,7 @@ import (
 	"SophonClientv2/pkg/downloader"
 	"SophonClientv2/pkg/verifier"
 	"sync"
+	"time"
 )
 
 type ChunkDestination struct {
@@ -57,6 +58,7 @@ type FileOutput struct {
 type retryDispatchInput struct {
 	Metadata *ChunkMetaData
 	Stage    string
+	Attempt  int
 }
 
 type Installer struct {
@@ -69,6 +71,14 @@ type Installer struct {
 
 	InputQueue         chan ChunksInput
 	retryDispatchQueue chan retryDispatchInput
+	retryOverflowQueue chan retryDispatchInput
+
+	retryOverflowBufferMu sync.Mutex
+	retryOverflowBuffer   []retryDispatchInput
+
+	retrySatMu     sync.Mutex
+	retrySatSince  time.Time
+	retrySatWarned bool
 
 	inputQueueStateMu sync.RWMutex
 	inputQueueClosed  bool
