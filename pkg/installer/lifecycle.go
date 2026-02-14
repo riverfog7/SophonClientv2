@@ -3,8 +3,13 @@ package installer
 import (
 	"SophonClientv2/internal/config"
 	"SophonClientv2/internal/logging"
+	"errors"
 	"fmt"
+	"io"
 	"math/rand"
+	"os"
+	"path/filepath"
+	"syscall"
 	"time"
 )
 
@@ -56,6 +61,145 @@ func retryDelay(attempt, baseMs, maxMs, jitterMs int) time.Duration {
 	}
 
 	return time.Duration(delayMs) * time.Millisecond
+}
+
+func filesystemErrno(err error) (syscall.Errno, bool) {
+	if err == nil {
+		return 0, false
+	}
+
+	var errno syscall.Errno
+	if errors.As(err, &errno) {
+		return errno, true
+	}
+
+	return 0, false
+}
+
+func isCrossDeviceError(err error) bool {
+	return errors.Is(err, syscall.EXDEV)
+}
+
+func isTerminalFilesystemError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	if errors.Is(err, os.ErrPermission) {
+		return true
+	}
+
+	errno, ok := filesystemErrno(err)
+	if !ok {
+		return false
+	}
+
+	switch errno {
+	case syscall.ENOSPC,
+		syscall.EDQUOT,
+		syscall.EROFS,
+		syscall.EIO,
+		syscall.ENODEV,
+		syscall.ENXIO,
+		syscall.ENOTCONN,
+		syscall.EACCES,
+		syscall.EPERM,
+		syscall.ENOENT:
+		return true
+	default:
+		return false
+	}
+}
+
+func filesystemStageError(stage, op, path, chunkID, filePath string, err error) error {
+	if err == nil {
+		return fmt.Errorf("%s failed at %s", stage, op)
+	}
+
+	if chunkID == "" {
+		chunkID = "-"
+	}
+	if filePath == "" {
+		filePath = "-"
+	}
+	if path == "" {
+		path = "-"
+	}
+
+	if errno, ok := filesystemErrno(err); ok {
+		return fmt.Errorf("%s filesystem failure (%s, errno=%d:%s, path=%s, chunk=%s, file=%s): %w", stage, op, errno, errno.Error(), path, chunkID, filePath, err)
+	}
+
+	return fmt.Errorf("%s filesystem failure (%s, path=%s, chunk=%s, file=%s): %w", stage, op, path, chunkID, filePath, err)
+}
+
+func moveStagedFileWithFallback(srcPath, dstPath string) error {
+	if err := os.Rename(srcPath, dstPath); err == nil {
+		return nil
+	} else if !isCrossDeviceError(err) {
+		return err
+	}
+
+	logging.GlobalLogger.Info(fmt.Sprintf("Using cross-device move fallback for %s -> %s", srcPath, dstPath))
+
+	srcFile, err := os.Open(srcPath)
+	if err != nil {
+		return err
+	}
+	defer srcFile.Close()
+
+	srcInfo, err := srcFile.Stat()
+	if err != nil {
+		return err
+	}
+
+	dstDir := filepath.Dir(dstPath)
+	if err := os.MkdirAll(dstDir, 0o755); err != nil {
+		return err
+	}
+
+	tmpFile, err := os.CreateTemp(dstDir, "."+filepath.Base(dstPath)+".sophon.tmp.")
+	if err != nil {
+		return err
+	}
+
+	tmpPath := tmpFile.Name()
+	cleanupTmp := true
+	defer func() {
+		if cleanupTmp {
+			_ = os.Remove(tmpPath)
+		}
+	}()
+
+	if _, err := io.Copy(tmpFile, srcFile); err != nil {
+		_ = tmpFile.Close()
+		return err
+	}
+
+	if err := tmpFile.Sync(); err != nil {
+		_ = tmpFile.Close()
+		return err
+	}
+
+	if err := tmpFile.Close(); err != nil {
+		return err
+	}
+
+	if err := os.Chmod(tmpPath, srcInfo.Mode()); err != nil {
+		return err
+	}
+
+	if err := os.Rename(tmpPath, dstPath); err != nil {
+		return err
+	}
+
+	cleanupTmp = false
+
+	if err := os.Remove(srcPath); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func (inst *Installer) retryOverflowBufferLen() int {

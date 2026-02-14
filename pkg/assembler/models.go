@@ -18,6 +18,9 @@ type AssemblerOutput struct {
 	ChunkID   string
 	Succeeded bool
 	Payload   any
+	Err       error
+	Op        string
+	Path      string
 }
 
 type Assembler struct {

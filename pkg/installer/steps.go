@@ -318,7 +318,17 @@ func (inst *Installer) VerifyFiles() {
 			}
 
 			if !assemblerOutput.Succeeded {
-				logging.GlobalLogger.Warn(fmt.Sprintf("Assembly failed for chunk %s, re-enqueueing", cm.ChunkID))
+				if assemblerOutput.Err != nil && isTerminalFilesystemError(assemblerOutput.Err) {
+					inst.setTerminalError(filesystemStageError("assemble", assemblerOutput.Op, assemblerOutput.Path, cm.ChunkID, filePath, assemblerOutput.Err))
+					continue
+				}
+
+				if assemblerOutput.Err != nil {
+					logging.GlobalLogger.Warn(fmt.Sprintf("Assembly failed for chunk %s (%s %s): %v, re-enqueueing", cm.ChunkID, assemblerOutput.Op, assemblerOutput.Path, assemblerOutput.Err))
+				} else {
+					logging.GlobalLogger.Warn(fmt.Sprintf("Assembly failed for chunk %s, re-enqueueing", cm.ChunkID))
+				}
+
 				if inst.tryRequeueChunk(cm, "assemble") {
 					inst.Progress.IncrementTotalBytes(int64(cm.CompressedSize))
 				}
@@ -503,13 +513,12 @@ func (inst *Installer) MoveFiles() {
 
 			finalDir := filepath.Dir(finalPath)
 			if err := os.MkdirAll(finalDir, 0o755); err != nil {
-				inst.setTerminalError(fmt.Errorf("failed to create final directory %s: %w", finalDir, err))
+				inst.setTerminalError(filesystemStageError("move", "mkdir", finalDir, "", fm.FilePath, err))
 				continue
 			}
 
-			err := os.Rename(stagingPath, finalPath)
-			if err != nil {
-				inst.setTerminalError(fmt.Errorf("failed to move file %s -> %s: %w", stagingPath, finalPath, err))
+			if err := moveStagedFileWithFallback(stagingPath, finalPath); err != nil {
+				inst.setTerminalError(filesystemStageError("move", "rename-or-copy", finalPath, "", fm.FilePath, err))
 				continue
 			}
 
