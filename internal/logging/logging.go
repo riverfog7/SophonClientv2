@@ -110,13 +110,13 @@ func (l *Logger) Fatal(message string) {
 		l.HandleMessage(fatalColored)
 	}
 
-	err := l.LogFile.Sync()
-	if err != nil {
-		panic(err)
-	}
-	err = l.LogFile.Close()
-	if err != nil {
-		panic(err)
+	if l.LogToFile && l.LogFile != nil {
+		if err := l.LogFile.Sync(); err != nil {
+			_, _ = fmt.Fprintf(os.Stderr, "[WARN] failed to sync log file during fatal: %v\n", err)
+		}
+		if err := l.LogFile.Close(); err != nil {
+			_, _ = fmt.Fprintf(os.Stderr, "[WARN] failed to close log file during fatal: %v\n", err)
+		}
 	}
 	os.Exit(1) // Exit in fatal errors
 }
