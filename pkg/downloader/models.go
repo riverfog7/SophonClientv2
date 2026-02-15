@@ -1,6 +1,7 @@
 package downloader
 
 import (
+	"context"
 	"io"
 	"net/http"
 	"sync"
@@ -19,6 +20,7 @@ type DownloaderOutput struct {
 
 type DownloaderWorker struct {
 	Id          int
+	Ctx         context.Context
 	HttpClient  *http.Client
 	InputQueue  chan DownloaderInput
 	OutputQueue chan DownloaderOutput
@@ -35,4 +37,7 @@ type Downloader struct {
 
 	statusStopCh chan struct{}
 	stopOnce     sync.Once
+
+	ctx    context.Context
+	cancel context.CancelFunc
 }

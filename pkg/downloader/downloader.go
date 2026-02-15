@@ -5,9 +5,13 @@ import (
 	"SophonClientv2/internal/logging"
 	"SophonClientv2/pkg/utils"
 	"bytes"
+	"context"
+	"errors"
 	"io"
 	"math/rand"
+	"net"
 	"net/http"
+	"net/url"
 	"strconv"
 	"sync"
 	"time"
@@ -40,13 +44,101 @@ func downloaderRetryDelay(attempt int) time.Duration {
 	return time.Duration(delayMs) * time.Millisecond
 }
 
-func NewWorker(id int, httpClient *http.Client, inputQueue chan DownloaderInput, outputQueue chan DownloaderOutput, wg *sync.WaitGroup) *DownloaderWorker {
+func shouldLogRetry(attempt, maxRetries int) bool {
+	if maxRetries <= 2 {
+		return true
+	}
+	return attempt == 1 || attempt == maxRetries-1
+}
+
+func sleepWithContext(ctx context.Context, delay time.Duration) bool {
+	if delay <= 0 {
+		return true
+	}
+
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
+	}
+}
+
+func isRetryableHTTPStatus(statusCode int) bool {
+	switch statusCode {
+	case http.StatusRequestTimeout,
+		http.StatusTooManyRequests,
+		http.StatusInternalServerError,
+		http.StatusBadGateway,
+		http.StatusServiceUnavailable,
+		http.StatusGatewayTimeout:
+		return true
+	default:
+		return false
+	}
+}
+
+func isRetryableDownloadError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	if errors.Is(err, context.Canceled) {
+		return false
+	}
+
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+
+	var urlErr *url.Error
+	if errors.As(err, &urlErr) {
+		if errors.Is(urlErr.Err, context.Canceled) {
+			return false
+		}
+		if errors.Is(urlErr.Err, context.DeadlineExceeded) {
+			return true
+		}
+	}
+
+	var dnsErr *net.DNSError
+	if errors.As(err, &dnsErr) {
+		return true
+	}
+
+	var opErr *net.OpError
+	if errors.As(err, &opErr) {
+		return true
+	}
+
+	var netErr net.Error
+	if errors.As(err, &netErr) {
+		return true
+	}
+
+	return true
+}
+
+func NewWorker(id int, ctx context.Context, httpClient *http.Client, inputQueue chan DownloaderInput, outputQueue chan DownloaderOutput, wg *sync.WaitGroup) *DownloaderWorker {
 	return &DownloaderWorker{
 		Id:          id,
+		Ctx:         ctx,
 		HttpClient:  httpClient,
 		InputQueue:  inputQueue,
 		OutputQueue: outputQueue,
 		wg:          wg,
+	}
+}
+
+func (worker *DownloaderWorker) emitOutput(out DownloaderOutput) bool {
+	select {
+	case <-worker.Ctx.Done():
+		return false
+	case worker.OutputQueue <- out:
+		return true
 	}
 }
 
@@ -57,48 +149,110 @@ func (worker *DownloaderWorker) Start() {
 	go func() {
 		defer worker.wg.Done()
 		maxRetries := config.Config.MaxChunkDownloadRetries
-		for input := range worker.InputQueue {
-			for attempt := 1; attempt <= maxRetries; attempt++ {
-				resp, err := worker.HttpClient.Get(input.Url)
-				if err != nil {
-					if attempt < maxRetries {
-						logging.GlobalLogger.Warn("Worker " + strconv.Itoa(worker.Id) + ": Failed to download chunk, retrying... (attempt " + strconv.Itoa(attempt) + ")")
-						time.Sleep(downloaderRetryDelay(attempt))
-						continue
-					}
-					logging.GlobalLogger.Error("Worker " + strconv.Itoa(worker.Id) + ": Failed to download chunk from " + input.Url + ": " + err.Error())
-					worker.OutputQueue <- DownloaderOutput{Content: nil, Suceeded: false, Payload: input.Payload}
-					break
+		if maxRetries < 1 {
+			maxRetries = 1
+		}
+
+		for {
+			select {
+			case <-worker.Ctx.Done():
+				return
+			case input, ok := <-worker.InputQueue:
+				if !ok {
+					return
 				}
 
-				if resp.StatusCode != http.StatusOK {
-					utils.DrainAndClose(resp.Body)
-					if attempt < maxRetries {
-						logging.GlobalLogger.Warn("Worker " + strconv.Itoa(worker.Id) + ": Failed to download chunk with status " + resp.Status + ", retrying... (attempt " + strconv.Itoa(attempt) + ")")
-						time.Sleep(downloaderRetryDelay(attempt))
-						continue
+				for attempt := 1; attempt <= maxRetries; attempt++ {
+					if worker.Ctx.Err() != nil {
+						return
 					}
-					logging.GlobalLogger.Error("Worker " + strconv.Itoa(worker.Id) + ": Failed to download chunk from " + input.Url + " with status " + resp.Status)
-					worker.OutputQueue <- DownloaderOutput{Content: nil, Suceeded: false, Payload: input.Payload}
+
+					req, reqErr := http.NewRequestWithContext(worker.Ctx, http.MethodGet, input.Url, nil)
+					if reqErr != nil {
+						logging.GlobalLogger.Error("Worker " + strconv.Itoa(worker.Id) + ": Failed to build request for " + input.Url + ": " + reqErr.Error())
+						if !worker.emitOutput(DownloaderOutput{Content: nil, Suceeded: false, Payload: input.Payload}) {
+							return
+						}
+						break
+					}
+
+					resp, err := worker.HttpClient.Do(req)
+					if err != nil {
+						if worker.Ctx.Err() != nil || errors.Is(err, context.Canceled) {
+							return
+						}
+
+						retryable := isRetryableDownloadError(err)
+						if retryable && attempt < maxRetries {
+							if shouldLogRetry(attempt, maxRetries) {
+								logging.GlobalLogger.Warn("Worker " + strconv.Itoa(worker.Id) + ": Download transport failure, retrying... (attempt " + strconv.Itoa(attempt) + ")")
+							}
+							if !sleepWithContext(worker.Ctx, downloaderRetryDelay(attempt)) {
+								return
+							}
+							continue
+						}
+
+						logging.GlobalLogger.Error("Worker " + strconv.Itoa(worker.Id) + ": Failed to download chunk from " + input.Url + " (transport): " + err.Error())
+						if !worker.emitOutput(DownloaderOutput{Content: nil, Suceeded: false, Payload: input.Payload}) {
+							return
+						}
+						break
+					}
+
+					if resp.StatusCode != http.StatusOK {
+						statusCode := resp.StatusCode
+						utils.DrainAndClose(resp.Body)
+
+						retryable := isRetryableHTTPStatus(statusCode)
+						if retryable && attempt < maxRetries {
+							if shouldLogRetry(attempt, maxRetries) {
+								logging.GlobalLogger.Warn("Worker " + strconv.Itoa(worker.Id) + ": Download HTTP " + strconv.Itoa(statusCode) + ", retrying... (attempt " + strconv.Itoa(attempt) + ")")
+							}
+							if !sleepWithContext(worker.Ctx, downloaderRetryDelay(attempt)) {
+								return
+							}
+							continue
+						}
+
+						logging.GlobalLogger.Error("Worker " + strconv.Itoa(worker.Id) + ": Failed to download chunk from " + input.Url + " (http_" + strconv.Itoa(statusCode) + ")")
+						if !worker.emitOutput(DownloaderOutput{Content: nil, Suceeded: false, Payload: input.Payload}) {
+							return
+						}
+						break
+					}
+
+					contentBytes, readErr := io.ReadAll(resp.Body)
+					utils.CloseQuietly(resp.Body)
+					if readErr != nil {
+						if worker.Ctx.Err() != nil || errors.Is(readErr, context.Canceled) {
+							return
+						}
+
+						retryable := isRetryableDownloadError(readErr)
+						if retryable && attempt < maxRetries {
+							if shouldLogRetry(attempt, maxRetries) {
+								logging.GlobalLogger.Warn("Worker " + strconv.Itoa(worker.Id) + ": Failed to read chunk body, retrying... (attempt " + strconv.Itoa(attempt) + ")")
+							}
+							if !sleepWithContext(worker.Ctx, downloaderRetryDelay(attempt)) {
+								return
+							}
+							continue
+						}
+
+						logging.GlobalLogger.Error("Worker " + strconv.Itoa(worker.Id) + ": Error reading response body from " + input.Url + " (read_body): " + readErr.Error())
+						if !worker.emitOutput(DownloaderOutput{Content: nil, Suceeded: false, Payload: input.Payload}) {
+							return
+						}
+						break
+					}
+
+					logging.GlobalLogger.Debug("Worker " + strconv.Itoa(worker.Id) + ": Successfully downloaded chunk from " + input.Url)
+					if !worker.emitOutput(DownloaderOutput{Content: io.NopCloser(bytes.NewReader(contentBytes)), Suceeded: true, Payload: input.Payload}) {
+						return
+					}
 					break
 				}
-
-				contentBytes, readErr := io.ReadAll(resp.Body)
-				utils.CloseQuietly(resp.Body)
-				if readErr != nil {
-					if attempt < maxRetries {
-						logging.GlobalLogger.Warn("Worker " + strconv.Itoa(worker.Id) + ": Failed to read chunk body, retrying... (attempt " + strconv.Itoa(attempt) + ")")
-						time.Sleep(downloaderRetryDelay(attempt))
-						continue
-					}
-					logging.GlobalLogger.Error("Worker " + strconv.Itoa(worker.Id) + ": Error reading response body from " + input.Url + ": " + readErr.Error())
-					worker.OutputQueue <- DownloaderOutput{Content: nil, Suceeded: false, Payload: input.Payload}
-					break
-				}
-
-				logging.GlobalLogger.Debug("Worker " + strconv.Itoa(worker.Id) + ": Successfully downloaded chunk from " + input.Url)
-				worker.OutputQueue <- DownloaderOutput{Content: io.NopCloser(bytes.NewReader(contentBytes)), Suceeded: true, Payload: input.Payload}
-				break
 			}
 		}
 	}()
@@ -125,10 +279,12 @@ func NewDownloader(buffSize int) *Downloader {
 		Timeout:   5 * time.Minute,
 	}
 
+	ctx, cancel := context.WithCancel(context.Background())
+
 	wg := &sync.WaitGroup{}
 
 	for i := 0; i < threadCount; i++ {
-		workers[i] = NewWorker(i, httpClient, inputQueue, outputQueue, wg)
+		workers[i] = NewWorker(i, ctx, httpClient, inputQueue, outputQueue, wg)
 		workers[i].Start()
 	}
 
@@ -140,6 +296,8 @@ func NewDownloader(buffSize int) *Downloader {
 		Workers:      workers,
 		wg:           wg,
 		statusStopCh: make(chan struct{}),
+		ctx:          ctx,
+		cancel:       cancel,
 	}
 	downloader.StartPrintChannelStatus(config.Config.QueueLengthPrintInterval)
 	return downloader
@@ -168,6 +326,9 @@ func (d *Downloader) PrintChannelStatus() {
 func (d *Downloader) Stop() {
 	d.stopOnce.Do(func() {
 		close(d.statusStopCh)
+		if d.cancel != nil {
+			d.cancel()
+		}
 		close(d.InputQueue)
 		d.wg.Wait()
 		close(d.OutputQueue)
@@ -177,21 +338,6 @@ func (d *Downloader) Stop() {
 
 func (d *Downloader) EnqueueDownload(url string, payload any) {
 	utils.NonBlockingEnqueue(d.InputQueue, DownloaderInput{Url: url, Payload: payload})
-}
-
-func (d *Downloader) TryEnqueueDownload(url string, payload any) (ok bool) {
-	defer func() {
-		if recover() != nil {
-			ok = false
-		}
-	}()
-
-	select {
-	case d.InputQueue <- DownloaderInput{Url: url, Payload: payload}:
-		return true
-	default:
-		return false
-	}
 }
 
 func (d *Downloader) GetOutputChannel() chan DownloaderOutput {
