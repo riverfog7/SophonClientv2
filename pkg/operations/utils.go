@@ -59,9 +59,9 @@ func GetAndParseManifest(gameType string, relType string, matchingField string, 
 	}
 	for _, manifestInfo := range sophonBuild.Data.Manifests {
 		if manifestInfo.MatchingField == matchingField {
-			mani := manifest.GetManifest(manifestInfo)
-			if mani == nil {
-				logging.GlobalLogger.Fatal("Failed to fetch manifest for matching field: " + matchingField)
+			mani, err := manifest.GetManifest(manifestInfo)
+			if err != nil {
+				logging.GlobalLogger.Fatal("Failed to fetch manifest for matching field: " + matchingField + ": " + err.Error())
 			}
 			return mani, &manifestInfo
 		}
@@ -82,9 +82,9 @@ func GetAndParsePatchManifest(gameType string, relType string, matchingField str
 	}
 	for _, manifestInfo := range sophonPatchBuild.Data.Manifests {
 		if manifestInfo.MatchingField == matchingField {
-			mani := manifest.GetLdiffManifest(manifestInfo)
-			if mani == nil {
-				logging.GlobalLogger.Fatal("Failed to fetch patch manifest for matching field: " + matchingField)
+			mani, err := manifest.GetLdiffManifest(manifestInfo)
+			if err != nil {
+				logging.GlobalLogger.Fatal("Failed to fetch patch manifest for matching field: " + matchingField + ": " + err.Error())
 			}
 			return mani, &manifestInfo
 		}

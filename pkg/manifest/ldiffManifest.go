@@ -4,20 +4,14 @@ import (
 	"SophonClientv2/internal/config"
 	"SophonClientv2/internal/logging"
 	"SophonClientv2/internal/models"
-	"crypto/md5"
-	"encoding/hex"
-	"hash"
-	"io"
-	"net/http"
+	"fmt"
 	"strconv"
 	"time"
 
-	"github.com/klauspost/compress/zstd"
 	"google.golang.org/protobuf/proto"
 )
 
-func GetLdiffManifest(sophonPatchAPIManifest models.SophonPatchManifest) *models.DiffManifest {
-	var url string
+func GetLdiffManifest(sophonPatchAPIManifest models.SophonPatchManifest) (*models.DiffManifest, error) {
 	urlPrefix := sophonPatchAPIManifest.ManifestDownload.UrlPrefix
 	urlSuffix := sophonPatchAPIManifest.ManifestDownload.UrlSuffix
 	manifestID := sophonPatchAPIManifest.Manifest.ID
@@ -27,72 +21,36 @@ func GetLdiffManifest(sophonPatchAPIManifest models.SophonPatchManifest) *models
 	isEncrypted := sophonPatchAPIManifest.ManifestDownload.Encryption != 0
 
 	if isEncrypted {
-		logging.GlobalLogger.Fatal("Encrypted manifests are not supported")
+		return nil, fmt.Errorf("encrypted manifests are not supported")
 	}
 
-	if urlSuffix != "" {
-		url = urlPrefix + "/" + manifestID + "/" + urlSuffix
-	} else {
-		url = urlPrefix + "/" + manifestID
-	}
+	url := buildManifestURL(urlPrefix, manifestID, urlSuffix)
 
 	maxRetries := config.Config.MaxManifestDownloadRetries
+	if maxRetries < 1 {
+		maxRetries = 1
+	}
+
 	for attempt := 1; attempt <= maxRetries; attempt++ {
-		resp, err := http.Get(url)
+		data, retryable, err := fetchManifestPayload(url, isCompressed, manifestChecksum, "patch manifest")
 		if err != nil {
-			if attempt < maxRetries {
-				logging.GlobalLogger.Warn("Failed to fetch manifest, retrying... (attempt " + strconv.Itoa(attempt) + ")")
+			if retryable && attempt < maxRetries {
+				logging.GlobalLogger.Warn("Failed to fetch patch manifest, retrying... (attempt " + strconv.Itoa(attempt) + "): " + err.Error())
 				time.Sleep(time.Duration(attempt) * time.Second)
 				continue
 			}
-			logging.GlobalLogger.Fatal("Failed to fetch patch manifest: " + err.Error())
-		}
-		defer resp.Body.Close()
-		logging.GlobalLogger.Info("Fetched patch manifest successfully with status: " + resp.Status)
-
-		var reader io.Reader = resp.Body
-		if isCompressed {
-			dec, err := zstd.NewReader(resp.Body)
-			if err != nil {
-				logging.GlobalLogger.Fatal("Failed to create zstd streaming reader: " + err.Error())
-			}
-			defer dec.Close()
-			reader = dec
-		}
-
-		var hashWriter hash.Hash
-		if manifestChecksum != "" {
-			hashWriter = md5.New()
-			reader = io.TeeReader(reader, hashWriter)
-		}
-
-		data, err := io.ReadAll(reader)
-		if err != nil {
-			logging.GlobalLogger.Fatal("Failed to read patch manifest: " + err.Error())
-		}
-
-		if manifestChecksum != "" {
-			computedHash := hex.EncodeToString(hashWriter.Sum(nil))
-			if computedHash != manifestChecksum {
-				if attempt < maxRetries {
-					logging.GlobalLogger.Warn("Patch manifest hash mismatch, retrying... (attempt " + strconv.Itoa(attempt) + ")")
-					time.Sleep(time.Duration(attempt) * time.Second)
-					continue
-				}
-				logging.GlobalLogger.Fatal("Patch manifest hash mismatch after retries")
-			}
+			return nil, err
 		}
 
 		var manifest models.DiffManifest
 		err = proto.Unmarshal(data, &manifest)
 		if err != nil {
-			logging.GlobalLogger.Fatal("Failed to decode patch manifest: " + err.Error())
+			return nil, fmt.Errorf("decode patch manifest: %w", err)
 		}
 
 		logging.GlobalLogger.Info("Patch manifest decoded successfully")
-		return &manifest
+		return &manifest, nil
 	}
 
-	logging.GlobalLogger.Fatal("Failed to fetch patch manifest after retries")
-	return nil
+	return nil, fmt.Errorf("failed to fetch patch manifest after retries")
 }
