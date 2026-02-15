@@ -30,7 +30,7 @@ func BuildSophonGetBuildURL(relType string, branch models.HYPGameBranch) string 
 	)
 }
 
-func GetSophonBuildE(url string) (models.SophonGetBuildAPIResponse, error) {
+func GetSophonBuild(url string) (models.SophonGetBuildAPIResponse, error) {
 	resp, err := http.Get(url)
 	if err != nil {
 		return models.SophonGetBuildAPIResponse{}, fmt.Errorf("fetch sophon build: %w", err)
@@ -57,25 +57,7 @@ func GetSophonBuildE(url string) (models.SophonGetBuildAPIResponse, error) {
 	return buildResponse, nil
 }
 
-func GetSophonBuild(url string) models.SophonGetBuildAPIResponse {
-	build, err := GetSophonBuildE(url)
-	if err != nil {
-		logging.GlobalLogger.Error("Failed to get Sophon build: " + err.Error())
-		return models.SophonGetBuildAPIResponse{}
-	}
-	return build
-}
-
-func GetSophonBuildByBranchE(relType string, branch models.HYPGameBranch) (models.SophonGetBuildAPIResponse, error) {
+func GetSophonBuildByBranch(relType string, branch models.HYPGameBranch) (models.SophonGetBuildAPIResponse, error) {
 	url := BuildSophonGetBuildURL(relType, branch)
-	return GetSophonBuildE(url)
-}
-
-func GetSophonBuildByBranch(relType string, branch models.HYPGameBranch) models.SophonGetBuildAPIResponse {
-	build, err := GetSophonBuildByBranchE(relType, branch)
-	if err != nil {
-		logging.GlobalLogger.Error("Failed to get Sophon build by branch: " + err.Error())
-		return models.SophonGetBuildAPIResponse{}
-	}
-	return build
+	return GetSophonBuild(url)
 }

@@ -5,10 +5,11 @@ import (
 	"SophonClientv2/internal/models"
 	"SophonClientv2/pkg/hypAPI"
 	"SophonClientv2/pkg/manifest"
+	"fmt"
 	"strings"
 )
 
-func getGameBranch(gameType string, relType string, branch string) models.HYPGameBranch {
+func getGameBranch(gameType string, relType string, branch string) (models.HYPGameBranch, error) {
 	var biz string
 	var hypGames []models.HYPGame
 	switch strings.ToLower(relType) {
@@ -21,13 +22,20 @@ func getGameBranch(gameType string, relType string, branch string) models.HYPGam
 	default:
 		logging.GlobalLogger.Warn("Unknown release type in function GetAndParseManifest, defaulting to OS")
 		biz = strings.ToLower(gameType) + "_global"
+		hypGames = hypAPI.OSGameBranches.Data.GameBranches
 	}
 
-	var selectedGame models.HYPGame
-	for i, hypGame := range hypGames {
+	var selectedGame *models.HYPGame
+	for i := range hypGames {
+		hypGame := hypGames[i]
 		if strings.ToLower(hypGame.Game.Biz) == biz {
-			selectedGame = hypGames[i]
+			selectedGame = &hypGames[i]
+			break
 		}
+	}
+
+	if selectedGame == nil {
+		return models.HYPGameBranch{}, fmt.Errorf("game branch not found for biz %s", biz)
 	}
 
 	var targetBranch models.HYPGameBranch
@@ -38,58 +46,68 @@ func getGameBranch(gameType string, relType string, branch string) models.HYPGam
 		if selectedGame.PreDownload != nil {
 			targetBranch = *selectedGame.PreDownload
 		} else {
-			logging.GlobalLogger.Fatal("PreDownload branch not available for game: " + gameType + "_" + relType)
+			return models.HYPGameBranch{}, fmt.Errorf("predownload branch not available for game %s_%s", gameType, relType)
 		}
 	default:
 		logging.GlobalLogger.Warn("Unknown branch type in function GetAndParseManifest, defaulting to Main")
 		targetBranch = selectedGame.Main
 	}
 
-	return targetBranch
+	return targetBranch, nil
 }
 
-func GetAndParseManifest(gameType string, relType string, matchingField string, branch string) (*models.Manifest, *models.SophonManifest) {
-	targetBranch := getGameBranch(gameType, relType, branch)
-	sophonBuild := hypAPI.GetSophonBuildByBranch(relType, targetBranch)
-	if sophonBuild.Retcode != 0 {
-		logging.GlobalLogger.Fatal("Failed to fetch Sophon build for branch " + targetBranch.Branch + ": " + sophonBuild.Message)
+func GetAndParseManifest(gameType string, relType string, matchingField string, branch string) (*models.Manifest, *models.SophonManifest, error) {
+	targetBranch, err := getGameBranch(gameType, relType, branch)
+	if err != nil {
+		return nil, nil, err
 	}
+
+	sophonBuild, err := hypAPI.GetSophonBuildByBranch(relType, targetBranch)
+	if err != nil {
+		return nil, nil, fmt.Errorf("fetch sophon build for branch %s: %w", targetBranch.Branch, err)
+	}
+
 	for _, manifestInfo := range sophonBuild.Data.Manifests {
 		logging.GlobalLogger.Info("Matching field " + manifestInfo.MatchingField + " found for game " + gameType + "_" + relType + " on branch " + branch)
 	}
+
 	for _, manifestInfo := range sophonBuild.Data.Manifests {
 		if manifestInfo.MatchingField == matchingField {
 			mani, err := manifest.GetManifest(manifestInfo)
 			if err != nil {
-				logging.GlobalLogger.Fatal("Failed to fetch manifest for matching field: " + matchingField + ": " + err.Error())
+				return nil, nil, fmt.Errorf("fetch manifest for matching field %s: %w", matchingField, err)
 			}
-			return mani, &manifestInfo
+			return mani, &manifestInfo, nil
 		}
 	}
 
-	logging.GlobalLogger.Fatal("Failed to find matching manifest with field: " + matchingField)
-	return nil, nil
+	return nil, nil, fmt.Errorf("matching manifest not found for field %s", matchingField)
 }
 
-func GetAndParsePatchManifest(gameType string, relType string, matchingField string, branch string) (*models.DiffManifest, *models.SophonPatchManifest) {
-	targetBranch := getGameBranch(gameType, relType, branch)
-	sophonPatchBuild := hypAPI.GetSophonPatchBuildByBranch(relType, targetBranch)
-	if sophonPatchBuild.Retcode != 0 {
-		logging.GlobalLogger.Fatal("Failed to fetch Sophon patch build for branch " + targetBranch.Branch + ": " + sophonPatchBuild.Message)
+func GetAndParsePatchManifest(gameType string, relType string, matchingField string, branch string) (*models.DiffManifest, *models.SophonPatchManifest, error) {
+	targetBranch, err := getGameBranch(gameType, relType, branch)
+	if err != nil {
+		return nil, nil, err
 	}
+
+	sophonPatchBuild, err := hypAPI.GetSophonPatchBuildByBranch(relType, targetBranch)
+	if err != nil {
+		return nil, nil, fmt.Errorf("fetch sophon patch build for branch %s: %w", targetBranch.Branch, err)
+	}
+
 	for _, manifestInfo := range sophonPatchBuild.Data.Manifests {
 		logging.GlobalLogger.Info("Matching field " + manifestInfo.MatchingField + " found for game " + gameType + "_" + relType + " on branch " + branch)
 	}
+
 	for _, manifestInfo := range sophonPatchBuild.Data.Manifests {
 		if manifestInfo.MatchingField == matchingField {
 			mani, err := manifest.GetLdiffManifest(manifestInfo)
 			if err != nil {
-				logging.GlobalLogger.Fatal("Failed to fetch patch manifest for matching field: " + matchingField + ": " + err.Error())
+				return nil, nil, fmt.Errorf("fetch patch manifest for matching field %s: %w", matchingField, err)
 			}
-			return mani, &manifestInfo
+			return mani, &manifestInfo, nil
 		}
 	}
 
-	logging.GlobalLogger.Fatal("Failed to find matching patch manifest with field: " + matchingField)
-	return nil, nil
+	return nil, nil, fmt.Errorf("matching patch manifest not found for field %s", matchingField)
 }

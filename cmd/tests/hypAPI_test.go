@@ -28,7 +28,11 @@ func TestFetchCNGameBranches(t *testing.T) {
 		mainBranch := gameBranch.Main
 		url := hypAPI.BuildSophonGetBuildURL("cn", mainBranch)
 		fmt.Println(url)
-		sophon := hypAPI.GetSophonBuild(url)
+		sophon, err := hypAPI.GetSophonBuild(url)
+		if err != nil {
+			t.Logf("Error fetching Sophon build for %s: %v\n", mainBranch.Branch, err)
+			continue
+		}
 		if sophon.Retcode != 0 {
 			t.Logf("Error fetching Sophon build for %s: %s\n", mainBranch.Branch, sophon.Message)
 		}
@@ -41,7 +45,11 @@ func TestFetchOSGameBranches(t *testing.T) {
 		mainBranch := gameBranch.Main
 		url := hypAPI.BuildSophonGetBuildURL("os", mainBranch)
 		fmt.Println(url)
-		sophon := hypAPI.GetSophonBuild(url)
+		sophon, err := hypAPI.GetSophonBuild(url)
+		if err != nil {
+			t.Logf("Error fetching Sophon build for %s: %v\n", mainBranch.Branch, err)
+			continue
+		}
 		if sophon.Retcode != 0 {
 			t.Logf("Error fetching Sophon build for %s: %s\n", mainBranch.Branch, sophon.Message)
 		}
@@ -54,7 +62,11 @@ func TestFetchCNGamePatchBuilds(t *testing.T) {
 		mainBranch := gameBranch.Main
 		url := hypAPI.PatchSophonGetBuildURL("cn", mainBranch)
 		fmt.Println(url)
-		sophon := hypAPI.GetSophonPatchBuild(url)
+		sophon, err := hypAPI.GetSophonPatchBuild(url)
+		if err != nil {
+			t.Logf("Error fetching Sophon patch build for %s: %v\n", mainBranch.Branch, err)
+			continue
+		}
 		if sophon.Retcode != 0 {
 			t.Logf("Error fetching Sophon patch build for %s: %s\n", mainBranch.Branch, sophon.Message)
 		}
@@ -67,7 +79,11 @@ func TestFetchOSGamePatchBuilds(t *testing.T) {
 		mainBranch := gameBranch.Main
 		url := hypAPI.PatchSophonGetBuildURL("os", mainBranch)
 		fmt.Println(url)
-		sophon := hypAPI.GetSophonPatchBuild(url)
+		sophon, err := hypAPI.GetSophonPatchBuild(url)
+		if err != nil {
+			t.Logf("Error fetching Sophon patch build for %s: %v\n", mainBranch.Branch, err)
+			continue
+		}
 		if sophon.Retcode != 0 {
 			t.Logf("Error fetching Sophon patch build for %s: %s\n", mainBranch.Branch, sophon.Message)
 		}
@@ -75,55 +91,44 @@ func TestFetchOSGamePatchBuilds(t *testing.T) {
 }
 
 func TestParseAllManifests(t *testing.T) {
-	mani, info := operations.GetAndParseManifest("hkrpg", "os", "game", "main")
-	inst := installer.NewInstaller(".", ".", 100)
-	_ = inst.ParseManifest(mani, info.ChunkDownload)
+	targets := [][2]string{
+		{"hkrpg", "os"},
+		{"hkrpg", "cn"},
+		{"hk4e", "os"},
+		{"hk4e", "cn"},
+		{"bh3", "os"},
+		{"bh3", "cn"},
+		{"nap", "os"},
+		{"nap", "cn"},
+	}
 
-	mani, info = operations.GetAndParseManifest("hkrpg", "cn", "game", "main")
-	inst = installer.NewInstaller(".", ".", 100)
-	_ = inst.ParseManifest(mani, info.ChunkDownload)
+	for _, target := range targets {
+		mani, info, err := operations.GetAndParseManifest(target[0], target[1], "game", "main")
+		if err != nil {
+			t.Fatalf("failed parsing manifest for %s_%s: %v", target[0], target[1], err)
+		}
 
-	mani, info = operations.GetAndParseManifest("hk4e", "os", "game", "main")
-	inst = installer.NewInstaller(".", ".", 100)
-	_ = inst.ParseManifest(mani, info.ChunkDownload)
-
-	mani, info = operations.GetAndParseManifest("hk4e", "cn", "game", "main")
-	inst = installer.NewInstaller(".", ".", 100)
-	_ = inst.ParseManifest(mani, info.ChunkDownload)
-
-	mani, info = operations.GetAndParseManifest("bh3", "os", "game", "main")
-	inst = installer.NewInstaller(".", ".", 100)
-	_ = inst.ParseManifest(mani, info.ChunkDownload)
-
-	mani, info = operations.GetAndParseManifest("bh3", "cn", "game", "main")
-	inst = installer.NewInstaller(".", ".", 100)
-	_ = inst.ParseManifest(mani, info.ChunkDownload)
-
-	mani, info = operations.GetAndParseManifest("nap", "os", "game", "main")
-	inst = installer.NewInstaller(".", ".", 100)
-	_ = inst.ParseManifest(mani, info.ChunkDownload)
-
-	mani, info = operations.GetAndParseManifest("nap", "cn", "game", "main")
-	inst = installer.NewInstaller(".", ".", 100)
-	_ = inst.ParseManifest(mani, info.ChunkDownload)
+		inst := installer.NewInstaller(".", ".", 100)
+		_ = inst.ParseManifest(mani, info.ChunkDownload)
+	}
 }
 
 func TestParseAllPatchManifests(t *testing.T) {
-	_, _ = operations.GetAndParsePatchManifest("hkrpg", "os", "game", "main")
+	targets := [][2]string{
+		{"hkrpg", "os"},
+		{"hkrpg", "cn"},
+		{"hk4e", "os"},
+		{"hk4e", "cn"},
+		{"nap", "os"},
+		{"nap", "cn"},
+	}
 
-	_, _ = operations.GetAndParsePatchManifest("hkrpg", "cn", "game", "main")
-
-	_, _ = operations.GetAndParsePatchManifest("hk4e", "os", "game", "main")
-
-	_, _ = operations.GetAndParsePatchManifest("hk4e", "cn", "game", "main")
-
-	//_, _ = operations.GetAndParsePatchManifest("bh3", "os", "game", "main")
-
-	//_, _ = operations.GetAndParsePatchManifest("bh3", "cn", "game", "main")
-
-	_, _ = operations.GetAndParsePatchManifest("nap", "os", "game", "main")
-
-	_, _ = operations.GetAndParsePatchManifest("nap", "cn", "game", "main")
+	for _, target := range targets {
+		_, _, err := operations.GetAndParsePatchManifest(target[0], target[1], "game", "main")
+		if err != nil {
+			t.Fatalf("failed parsing patch manifest for %s_%s: %v", target[0], target[1], err)
+		}
+	}
 }
 
 func TestFullInstallation(t *testing.T) {
@@ -143,7 +148,10 @@ func TestFullInstallation(t *testing.T) {
 	}
 	defer pprof.StopCPUProfile()
 
-	mani, info := operations.GetAndParseManifest("hk4e", "os", "game", "main")
+	mani, info, err := operations.GetAndParseManifest("hk4e", "os", "game", "main")
+	if err != nil {
+		t.Fatalf("failed getting install manifest: %v", err)
+	}
 	inst := installer.NewInstaller("/Volumes/SSD/Games/Genshin Impact game1", "/Volumes/SSD/Games/Genshin Impact game1/.cache", 50)
 	_ = inst.ParseManifest(mani, info.ChunkDownload)
 	_ = inst.Prepare()

@@ -10,7 +10,7 @@ import (
 	"strings"
 )
 
-func GetGameBranchesE(relType string) (models.HYPGetGameBranchesResponse, error) {
+func GetGameBranches(relType string) (models.HYPGetGameBranchesResponse, error) {
 	var url string
 	switch strings.ToLower(relType) {
 	case "cn":
@@ -50,16 +50,7 @@ func GetGameBranchesE(relType string) (models.HYPGetGameBranchesResponse, error)
 	return branches, nil
 }
 
-func GetGameBranches(relType string) models.HYPGetGameBranchesResponse {
-	branches, err := GetGameBranchesE(relType)
-	if err != nil {
-		logging.GlobalLogger.Error("Failed to get game branches: " + err.Error())
-		return models.HYPGetGameBranchesResponse{}
-	}
-	return branches
-}
-
-func GetGameConfigsE(relType string) (models.HYPGetGameConfigsResponse, error) {
+func GetGameConfigs(relType string) (models.HYPGetGameConfigsResponse, error) {
 	var url string
 	switch strings.ToLower(relType) {
 	case "cn":
@@ -99,16 +90,7 @@ func GetGameConfigsE(relType string) (models.HYPGetGameConfigsResponse, error) {
 	return configs, nil
 }
 
-func GetGameConfigs(relType string) models.HYPGetGameConfigsResponse {
-	configs, err := GetGameConfigsE(relType)
-	if err != nil {
-		logging.GlobalLogger.Error("Failed to get game configs: " + err.Error())
-		return models.HYPGetGameConfigsResponse{}
-	}
-	return configs
-}
-
-var OSGameBranches = GetGameBranches("os")
-var CNGameBranches = GetGameBranches("cn")
-var OSGameConfigs = GetGameConfigs("os")
-var CNGameConfigs = GetGameConfigs("cn")
+var OSGameBranches, _ = GetGameBranches("os")
+var CNGameBranches, _ = GetGameBranches("cn")
+var OSGameConfigs, _ = GetGameConfigs("os")
+var CNGameConfigs, _ = GetGameConfigs("cn")

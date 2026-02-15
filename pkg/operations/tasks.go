@@ -1,7 +1,6 @@
 package operations
 
 import "SophonClientv2/internal/models"
-import "SophonClientv2/internal/logging"
 
 func PerformInstall(request models.InstallRequest) models.TaskResponse {
 	// TODO: Implement install
@@ -24,16 +23,18 @@ func RunTask(taskType string, request interface{}) models.TaskResponse {
 		if req, ok := request.(models.InstallRequest); ok {
 			return PerformInstall(req)
 		}
+		return models.TaskResponse{Status: "failed", Message: "invalid request type for install task"}
 	case "repair":
 		if req, ok := request.(models.RepairRequest); ok {
 			return PerformRepair(req)
 		}
+		return models.TaskResponse{Status: "failed", Message: "invalid request type for repair task"}
 	case "update":
 		if req, ok := request.(models.UpdateRequest); ok {
 			return PerformUpdate(req)
 		}
+		return models.TaskResponse{Status: "failed", Message: "invalid request type for update task"}
 	default:
-		logging.GlobalLogger.Fatal("Unknown task type: " + taskType)
+		return models.TaskResponse{Status: "failed", Message: "unknown task type: " + taskType}
 	}
-	return models.TaskResponse{} // Should not reach here
 }
