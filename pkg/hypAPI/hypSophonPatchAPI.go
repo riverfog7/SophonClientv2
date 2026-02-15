@@ -30,24 +30,52 @@ func PatchSophonGetBuildURL(relType string, branch models.HYPGameBranch) string 
 	)
 }
 
-func GetSophonPatchBuild(url string) models.SophonGetPatchBuildAPIResponse {
+func GetSophonPatchBuildE(url string) (models.SophonGetPatchBuildAPIResponse, error) {
 	resp, err := http.Post(url, "text/plain", nil)
 	if err != nil {
-		logging.GlobalLogger.Fatal("Failed to fetch Sophon patch build: " + err.Error())
+		return models.SophonGetPatchBuildAPIResponse{}, fmt.Errorf("fetch sophon patch build: %w", err)
 	}
 	defer resp.Body.Close()
+
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return models.SophonGetPatchBuildAPIResponse{}, fmt.Errorf("fetch sophon patch build: unexpected http status %s", resp.Status)
+	}
+
 	logging.GlobalLogger.Info("Fetched Sophon patch build successfully with status: " + resp.Status)
 
 	var buildResponse models.SophonGetPatchBuildAPIResponse
 	err = json.NewDecoder(resp.Body).Decode(&buildResponse)
 	if err != nil {
-		logging.GlobalLogger.Fatal("Failed to decode Sophon patch build response: " + err.Error())
+		return models.SophonGetPatchBuildAPIResponse{}, fmt.Errorf("decode sophon patch build response: %w", err)
 	}
+
+	if buildResponse.Retcode != 0 {
+		return models.SophonGetPatchBuildAPIResponse{}, fmt.Errorf("sophon patch build api returned retcode=%d message=%s", buildResponse.Retcode, buildResponse.Message)
+	}
+
 	logging.GlobalLogger.Info("Decoded Sophon patch build response successfully")
-	return buildResponse
+	return buildResponse, nil
+}
+
+func GetSophonPatchBuild(url string) models.SophonGetPatchBuildAPIResponse {
+	build, err := GetSophonPatchBuildE(url)
+	if err != nil {
+		logging.GlobalLogger.Error("Failed to get Sophon patch build: " + err.Error())
+		return models.SophonGetPatchBuildAPIResponse{}
+	}
+	return build
+}
+
+func GetSophonPatchBuildByBranchE(relType string, branch models.HYPGameBranch) (models.SophonGetPatchBuildAPIResponse, error) {
+	url := PatchSophonGetBuildURL(relType, branch)
+	return GetSophonPatchBuildE(url)
 }
 
 func GetSophonPatchBuildByBranch(relType string, branch models.HYPGameBranch) models.SophonGetPatchBuildAPIResponse {
-	url := PatchSophonGetBuildURL(relType, branch)
-	return GetSophonPatchBuild(url)
+	build, err := GetSophonPatchBuildByBranchE(relType, branch)
+	if err != nil {
+		logging.GlobalLogger.Error("Failed to get Sophon patch build by branch: " + err.Error())
+		return models.SophonGetPatchBuildAPIResponse{}
+	}
+	return build
 }
