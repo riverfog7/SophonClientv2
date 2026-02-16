@@ -9,6 +9,7 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 )
@@ -131,6 +132,105 @@ func filesystemStageError(stage, op, path, chunkID, filePath string, err error) 
 	}
 
 	return fmt.Errorf("%s filesystem failure (%s, path=%s, chunk=%s, file=%s): %w", stage, op, path, chunkID, filePath, err)
+}
+
+func terminalErrorHint(err error) string {
+	if err == nil {
+		return ""
+	}
+
+	if isTerminalFilesystemError(err) {
+		return "check disk space, permissions, and mount availability"
+	}
+
+	msg := strings.ToLower(err.Error())
+
+	switch {
+	case strings.Contains(msg, "unexpected http status: 404") || strings.Contains(msg, "http_404") || strings.Contains(msg, "status 404"):
+		return "remote chunk is missing (404); refresh build metadata and retry"
+	case strings.Contains(msg, "unexpected http status: 409") || strings.Contains(msg, "http_409") || strings.Contains(msg, "status 409"):
+		return "remote state is conflicting (409); refresh build metadata and retry"
+	case strings.Contains(msg, "unexpected http status: 410") || strings.Contains(msg, "http_410") || strings.Contains(msg, "status 410"):
+		return "remote chunk is gone (410); refresh build metadata and retry"
+	case strings.Contains(msg, "unexpected http status: 423") || strings.Contains(msg, "http_423") || strings.Contains(msg, "status 423"):
+		return "remote chunk is locked (423); retry later or refresh build metadata"
+	case strings.Contains(msg, "retry saturation exceeded grace"):
+		return "network may be unavailable; retry when connectivity stabilizes or lower concurrency"
+	case strings.Contains(msg, "md5 mismatch"):
+		return "data verification failed; retry on a stable network"
+	case strings.Contains(msg, "decompress"):
+		return "chunk data may be corrupted; retry and refresh metadata if it repeats"
+	case strings.Contains(msg, "timeout") || strings.Contains(msg, "connection") || strings.Contains(msg, "no such host") || strings.Contains(msg, "transport"):
+		return "check network connectivity and retry"
+	default:
+		return ""
+	}
+}
+
+func withTerminalHint(err error) error {
+	if err == nil {
+		return nil
+	}
+
+	msg := err.Error()
+	if strings.Contains(strings.ToLower(msg), "(hint:") {
+		return err
+	}
+
+	hint := terminalErrorHint(err)
+	if hint == "" {
+		return err
+	}
+
+	return fmt.Errorf("%s (hint: %s)", msg, hint)
+}
+
+func chunkRetryLimitError(cm *ChunkMetaData, key string, maxRetries int, currentStage string, lastCause retryFailureCause) error {
+	chunkID := "-"
+	filePath := "-"
+
+	if cm != nil {
+		if cm.ChunkID != "" {
+			chunkID = cm.ChunkID
+		}
+		if len(cm.Destinations) > 0 && cm.Destinations[0].File != nil && cm.Destinations[0].File.FilePath != "" {
+			filePath = cm.Destinations[0].File.FilePath
+		}
+	}
+
+	stage := currentStage
+	if lastCause.Stage != "" {
+		stage = lastCause.Stage
+	}
+	if stage == "" {
+		stage = "-"
+	}
+
+	if lastCause.Err != nil {
+		return fmt.Errorf("chunk retry limit reached (chunk=%s, file=%s, key=%s, stage=%s, max=%d, cause=%v)", chunkID, filePath, key, stage, maxRetries, lastCause.Err)
+	}
+
+	return fmt.Errorf("chunk retry limit reached (chunk=%s, file=%s, key=%s, stage=%s, max=%d)", chunkID, filePath, key, stage, maxRetries)
+}
+
+func fileRetryLimitError(filePath string, maxRetries int, currentStage string, lastCause retryFailureCause) error {
+	if filePath == "" {
+		filePath = "-"
+	}
+
+	stage := currentStage
+	if lastCause.Stage != "" {
+		stage = lastCause.Stage
+	}
+	if stage == "" {
+		stage = "-"
+	}
+
+	if lastCause.Err != nil {
+		return fmt.Errorf("file rebuild retry limit reached (file=%s, stage=%s, max=%d, cause=%v)", filePath, stage, maxRetries, lastCause.Err)
+	}
+
+	return fmt.Errorf("file rebuild retry limit reached (file=%s, stage=%s, max=%d)", filePath, stage, maxRetries)
 }
 
 func moveStagedFileWithFallback(srcPath, dstPath string) error {
@@ -318,6 +418,8 @@ func (inst *Installer) setTerminalError(err error) {
 		return
 	}
 
+	err = withTerminalHint(err)
+
 	inst.terminalErrOnce.Do(func() {
 		inst.terminalErrMu.Lock()
 		inst.terminalErr = err
@@ -332,6 +434,10 @@ func (inst *Installer) getTerminalError() error {
 	inst.terminalErrMu.RLock()
 	defer inst.terminalErrMu.RUnlock()
 	return inst.terminalErr
+}
+
+func (inst *Installer) TerminalError() error {
+	return inst.getTerminalError()
 }
 
 func (inst *Installer) hasTerminalError() bool {
@@ -485,7 +591,7 @@ func (inst *Installer) chunkRetryKey(cm *ChunkMetaData) string {
 	return cm.ChunkID
 }
 
-func (inst *Installer) tryRequeueChunk(cm *ChunkMetaData, stage string) bool {
+func (inst *Installer) tryRequeueChunk(cm *ChunkMetaData, stage string, cause error) bool {
 	if cm == nil {
 		inst.setTerminalError(fmt.Errorf("nil chunk metadata at %s", stage))
 		return false
@@ -497,10 +603,14 @@ func (inst *Installer) tryRequeueChunk(cm *ChunkMetaData, stage string) bool {
 	key := inst.chunkRetryKey(cm)
 
 	inst.retryMu.Lock()
+	if cause != nil {
+		inst.chunkRetryLastCause[key] = retryFailureCause{Stage: stage, Err: cause}
+	}
 	count := inst.chunkRetryCounts[key]
 	if count >= inst.maxChunkPipelineRetries {
+		lastCause := inst.chunkRetryLastCause[key]
 		inst.retryMu.Unlock()
-		inst.setTerminalError(fmt.Errorf("chunk retry limit reached for %s at %s", key, stage))
+		inst.setTerminalError(chunkRetryLimitError(cm, key, inst.maxChunkPipelineRetries, stage, lastCause))
 		return false
 	}
 	attempt := count + 1
@@ -526,7 +636,7 @@ func (inst *Installer) handleDownloadFailure(cm *ChunkMetaData, err error, retry
 		} else {
 			logging.GlobalLogger.Warn(fmt.Sprintf("Download failed for chunk %s, re-enqueueing", cm.ChunkID))
 		}
-		inst.tryRequeueChunk(cm, "download")
+		inst.tryRequeueChunk(cm, "download", err)
 		return
 	}
 
@@ -538,17 +648,21 @@ func (inst *Installer) handleDownloadFailure(cm *ChunkMetaData, err error, retry
 	inst.setTerminalError(fmt.Errorf("download failed permanently for chunk %s", cm.ChunkID))
 }
 
-func (inst *Installer) tryRequeueFile(filePath, stage string) bool {
+func (inst *Installer) tryRequeueFile(filePath, stage string, cause error) bool {
 	if filePath == "" {
 		inst.setTerminalError(fmt.Errorf("empty file path for requeue at %s", stage))
 		return false
 	}
 
 	inst.retryMu.Lock()
+	if cause != nil {
+		inst.fileRetryLastCause[filePath] = retryFailureCause{Stage: stage, Err: cause}
+	}
 	count := inst.fileRetryCounts[filePath]
 	if count >= inst.maxFileRebuildRetries {
+		lastCause := inst.fileRetryLastCause[filePath]
 		inst.retryMu.Unlock()
-		inst.setTerminalError(fmt.Errorf("file rebuild retry limit reached for %s at %s", filePath, stage))
+		inst.setTerminalError(fileRetryLimitError(filePath, inst.maxFileRebuildRetries, stage, lastCause))
 		return false
 	}
 	inst.fileRetryCounts[filePath] = count + 1

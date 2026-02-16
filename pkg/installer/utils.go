@@ -16,7 +16,9 @@ func (inst *Installer) ParseManifest(mani *models.Manifest, chunkDownload models
 	inst.Progress = InstallProgress{}
 	inst.retryMu.Lock()
 	inst.chunkRetryCounts = make(map[string]int)
+	inst.chunkRetryLastCause = make(map[string]retryFailureCause)
 	inst.fileRetryCounts = make(map[string]int)
+	inst.fileRetryLastCause = make(map[string]retryFailureCause)
 	inst.retryMu.Unlock()
 	inst.terminalErrMu.Lock()
 	inst.terminalErr = nil

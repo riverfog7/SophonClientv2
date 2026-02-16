@@ -41,7 +41,9 @@ func NewInstaller(gameDir, stagingDir string, queueSize int) *Installer {
 		Verifier2:    verifier.NewVerifier(config.Config.VerifyChanSize, false),
 
 		chunkRetryCounts:        make(map[string]int),
+		chunkRetryLastCause:     make(map[string]retryFailureCause),
 		fileRetryCounts:         make(map[string]int),
+		fileRetryLastCause:      make(map[string]retryFailureCause),
 		maxChunkPipelineRetries: config.Config.MaxChunkPipelineRetries,
 		maxFileRebuildRetries:   config.Config.MaxFileRebuildRetries,
 

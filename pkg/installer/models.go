@@ -61,6 +61,11 @@ type retryDispatchInput struct {
 	Attempt  int
 }
 
+type retryFailureCause struct {
+	Stage string
+	Err   error
+}
+
 type Installer struct {
 	GameDir    string
 	StagingDir string
@@ -93,7 +98,9 @@ type Installer struct {
 
 	retryMu                 sync.Mutex
 	chunkRetryCounts        map[string]int
+	chunkRetryLastCause     map[string]retryFailureCause
 	fileRetryCounts         map[string]int
+	fileRetryLastCause      map[string]retryFailureCause
 	maxChunkPipelineRetries int
 	maxFileRebuildRetries   int
 

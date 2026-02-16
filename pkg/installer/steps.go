@@ -214,7 +214,7 @@ func (inst *Installer) VerifyChunks() {
 					logging.GlobalLogger.Warn(fmt.Sprintf("Decompression failed for chunk %s, re-enqueueing", cm.ChunkID))
 				}
 				utils.CloseQuietly(decompressOutput.Content)
-				if inst.tryRequeueChunk(cm, "decompress") {
+				if inst.tryRequeueChunk(cm, "decompress", decompressOutput.Err) {
 					inst.Progress.IncrementTotalBytes(int64(cm.CompressedSize))
 				}
 
@@ -253,7 +253,7 @@ func (inst *Installer) AssembleChunks() {
 					logging.GlobalLogger.Warn(fmt.Sprintf("Verification failed for chunk %s, re-enqueueing", cm.ChunkID))
 				}
 				utils.CloseQuietly(verifyOutput.Content)
-				if inst.tryRequeueChunk(cm, "chunk-verify") {
+				if inst.tryRequeueChunk(cm, "chunk-verify", verifyOutput.Err) {
 					inst.Progress.IncrementTotalBytes(int64(cm.CompressedSize))
 				}
 
@@ -270,7 +270,7 @@ func (inst *Installer) AssembleChunks() {
 			if err != nil {
 				logging.GlobalLogger.Error(fmt.Sprintf("Failed to read verified content for chunk %s: %v, re-enqueueing", cm.ChunkID, err))
 				contentBytes = nil // Content is already closed by readAll or CloseQuietly
-				if inst.tryRequeueChunk(cm, "chunk-read") {
+				if inst.tryRequeueChunk(cm, "chunk-read", err) {
 					inst.Progress.IncrementTotalBytes(int64(cm.CompressedSize))
 				}
 				continue
@@ -336,7 +336,7 @@ func (inst *Installer) VerifyFiles() {
 					logging.GlobalLogger.Warn(fmt.Sprintf("Assembly failed for chunk %s, re-enqueueing", cm.ChunkID))
 				}
 
-				if inst.tryRequeueChunk(cm, "assemble") {
+				if inst.tryRequeueChunk(cm, "assemble", assemblerOutput.Err) {
 					inst.Progress.IncrementTotalBytes(int64(cm.CompressedSize))
 				}
 				continue
@@ -406,7 +406,7 @@ func (inst *Installer) VerifyFiles() {
 						logging.GlobalLogger.Warn(fmt.Sprintf("Failed to remove corrupted staging file %s: %v", stagingPath, removeErr))
 					}
 
-					if !inst.tryRequeueFile(fileMeta.FilePath, "verify-file-open") {
+					if !inst.tryRequeueFile(fileMeta.FilePath, "verify-file-open", err) {
 						continue
 					}
 
@@ -429,7 +429,7 @@ func (inst *Installer) VerifyFiles() {
 							},
 						}
 
-						if inst.tryRequeueChunk(cmNew, "verify-file-open") {
+						if inst.tryRequeueChunk(cmNew, "verify-file-open", err) {
 							inst.Progress.IncrementTotalBytes(int64(instance.Chunk.CompressedSize))
 						}
 						if inst.hasTerminalError() {
@@ -484,7 +484,7 @@ func (inst *Installer) MoveFiles() {
 					logging.GlobalLogger.Error(fmt.Sprintf("File verification failed: %s - re-enqueueing all chunks", fm.FilePath))
 				}
 				inst.clearFileVerifyInFlight(fm.FilePath)
-				if !inst.tryRequeueFile(fm.FilePath, "file-verify") {
+				if !inst.tryRequeueFile(fm.FilePath, "file-verify", verifyOutput.Err) {
 					continue
 				}
 
@@ -511,7 +511,7 @@ func (inst *Installer) MoveFiles() {
 						},
 					}
 
-					if inst.tryRequeueChunk(newCM, "file-verify") {
+					if inst.tryRequeueChunk(newCM, "file-verify", verifyOutput.Err) {
 						inst.Progress.IncrementTotalBytes(int64(instance.Chunk.CompressedSize))
 					}
 					if inst.hasTerminalError() {
