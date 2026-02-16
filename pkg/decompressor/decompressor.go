@@ -4,6 +4,7 @@ import (
 	"SophonClientv2/internal/config"
 	"SophonClientv2/internal/logging"
 	"SophonClientv2/pkg/utils"
+	"fmt"
 	"io"
 	"strconv"
 	"sync"
@@ -33,11 +34,18 @@ func (worker *DecompressorWorker) Start() {
 	go func() {
 		defer worker.wg.Done()
 		for input := range worker.InputQueue {
+			if input.Content == nil {
+				err := fmt.Errorf("nil compressed content")
+				logging.GlobalLogger.Error("Worker " + strconv.Itoa(worker.Id) + ": " + err.Error())
+				worker.OutputQueue <- DecompressorOutput{Content: nil, Suceeded: false, Err: err, Payload: input.Payload}
+				continue
+			}
+
 			dec, err := zstd.NewReader(input.Content)
 			if err != nil {
 				utils.CloseQuietly(input.Content)
 				logging.GlobalLogger.Error("Worker " + strconv.Itoa(worker.Id) + ": Failed to create zstd reader: " + err.Error())
-				worker.OutputQueue <- DecompressorOutput{Content: nil, Suceeded: false, Payload: input.Payload}
+				worker.OutputQueue <- DecompressorOutput{Content: nil, Suceeded: false, Err: err, Payload: input.Payload}
 				continue
 			}
 

@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"crypto/md5"
 	"encoding/hex"
+	"fmt"
 	"io"
 	"strconv"
 	"sync"
@@ -41,7 +42,7 @@ func (worker *VerifierWorker) Start() {
 					}
 					logging.GlobalLogger.Error("Worker " + strconv.Itoa(worker.Id) + ": Failed to read content: " + err.Error() + " for " + input.Name)
 					logging.GlobalLogger.Error("Worker " + strconv.Itoa(worker.Id) + ": Marking verification as failed for " + input.Name)
-					worker.OutputQueue <- VerifierOutput{Content: nil, Suceeded: false, Payload: input.Payload}
+					worker.OutputQueue <- VerifierOutput{Content: nil, Suceeded: false, Err: err, Payload: input.Payload}
 					continue
 				}
 				if cerr := input.Content.Close(); cerr != nil {
@@ -52,7 +53,7 @@ func (worker *VerifierWorker) Start() {
 
 				if computedHex != input.ExpectedMD5 {
 					logging.GlobalLogger.Warn("Worker " + strconv.Itoa(worker.Id) + ": MD5 mismatch - expected " + input.ExpectedMD5 + ", got " + computedHex + " for " + input.Name)
-					worker.OutputQueue <- VerifierOutput{Content: nil, Suceeded: false, Payload: input.Payload}
+					worker.OutputQueue <- VerifierOutput{Content: nil, Suceeded: false, Err: fmt.Errorf("md5 mismatch: expected %s got %s for %s", input.ExpectedMD5, computedHex, input.Name), Payload: input.Payload}
 					continue
 				}
 
@@ -66,7 +67,7 @@ func (worker *VerifierWorker) Start() {
 					}
 					logging.GlobalLogger.Error("Worker " + strconv.Itoa(worker.Id) + ": Failed to read content: " + err.Error() + " for " + input.Name)
 					logging.GlobalLogger.Error("Worker " + strconv.Itoa(worker.Id) + ": Marking verification as failed for " + input.Name)
-					worker.OutputQueue <- VerifierOutput{Content: nil, Suceeded: false, Payload: input.Payload}
+					worker.OutputQueue <- VerifierOutput{Content: nil, Suceeded: false, Err: err, Payload: input.Payload}
 					continue
 				}
 				if cerr := input.Content.Close(); cerr != nil {
@@ -77,7 +78,7 @@ func (worker *VerifierWorker) Start() {
 
 				if computedHex != input.ExpectedMD5 {
 					logging.GlobalLogger.Warn("Worker " + strconv.Itoa(worker.Id) + ": MD5 mismatch - expected " + input.ExpectedMD5 + ", got " + computedHex + " for " + input.Name)
-					worker.OutputQueue <- VerifierOutput{Content: nil, Suceeded: false, Payload: input.Payload}
+					worker.OutputQueue <- VerifierOutput{Content: nil, Suceeded: false, Err: fmt.Errorf("md5 mismatch: expected %s got %s for %s", input.ExpectedMD5, computedHex, input.Name), Payload: input.Payload}
 					continue
 				}
 

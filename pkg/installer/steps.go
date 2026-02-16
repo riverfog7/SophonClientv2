@@ -208,7 +208,11 @@ func (inst *Installer) VerifyChunks() {
 			}
 
 			if !decompressOutput.Suceeded {
-				logging.GlobalLogger.Warn(fmt.Sprintf("Decompression failed for chunk %s, re-enqueueing", cm.ChunkID))
+				if decompressOutput.Err != nil {
+					logging.GlobalLogger.Warn(fmt.Sprintf("Decompression failed for chunk %s (%v), re-enqueueing", cm.ChunkID, decompressOutput.Err))
+				} else {
+					logging.GlobalLogger.Warn(fmt.Sprintf("Decompression failed for chunk %s, re-enqueueing", cm.ChunkID))
+				}
 				utils.CloseQuietly(decompressOutput.Content)
 				if inst.tryRequeueChunk(cm, "decompress") {
 					inst.Progress.IncrementTotalBytes(int64(cm.CompressedSize))
@@ -243,7 +247,11 @@ func (inst *Installer) AssembleChunks() {
 			}
 
 			if !verifyOutput.Suceeded {
-				logging.GlobalLogger.Warn(fmt.Sprintf("Verification failed for chunk %s, re-enqueueing", cm.ChunkID))
+				if verifyOutput.Err != nil {
+					logging.GlobalLogger.Warn(fmt.Sprintf("Verification failed for chunk %s (%v), re-enqueueing", cm.ChunkID, verifyOutput.Err))
+				} else {
+					logging.GlobalLogger.Warn(fmt.Sprintf("Verification failed for chunk %s, re-enqueueing", cm.ChunkID))
+				}
 				utils.CloseQuietly(verifyOutput.Content)
 				if inst.tryRequeueChunk(cm, "chunk-verify") {
 					inst.Progress.IncrementTotalBytes(int64(cm.CompressedSize))
@@ -470,7 +478,11 @@ func (inst *Installer) MoveFiles() {
 			finalPath := filepath.Join(inst.GameDir, fm.FilePath)
 
 			if !verifyOutput.Suceeded {
-				logging.GlobalLogger.Error(fmt.Sprintf("File verification failed: %s - re-enqueueing all chunks", fm.FilePath))
+				if verifyOutput.Err != nil {
+					logging.GlobalLogger.Error(fmt.Sprintf("File verification failed: %s (%v) - re-enqueueing all chunks", fm.FilePath, verifyOutput.Err))
+				} else {
+					logging.GlobalLogger.Error(fmt.Sprintf("File verification failed: %s - re-enqueueing all chunks", fm.FilePath))
+				}
 				inst.clearFileVerifyInFlight(fm.FilePath)
 				if !inst.tryRequeueFile(fm.FilePath, "file-verify") {
 					continue

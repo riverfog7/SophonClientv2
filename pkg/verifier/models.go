@@ -15,6 +15,7 @@ type VerifierInput struct {
 type VerifierOutput struct {
 	Content  io.ReadCloser
 	Suceeded bool
+	Err      error
 	Payload  any
 }
 

@@ -15,6 +15,7 @@ type DecompressorInput struct {
 type DecompressorOutput struct {
 	Content  io.ReadCloser
 	Suceeded bool
+	Err      error
 	Payload  any
 }
 
