@@ -347,20 +347,8 @@ func (inst *Installer) VerifyFiles() {
 				fileAssembledChunks[filePath] = make(map[string]bool)
 			}
 
-			// Find the offset for this specific file to create a unique key
-			var offset uint64
-			var fileMeta *FileMetaData
-			for _, dest := range cm.Destinations {
-				if dest.File == nil {
-					continue
-				}
-				if dest.File.FilePath == filePath {
-					fileMeta = dest.File
-					offset = dest.Offset
-					break
-				}
-			}
-			if fileMeta == nil {
+			fileMeta, ok := inst.FileMap[filePath]
+			if !ok || fileMeta == nil {
 				inst.setTerminalError(fmt.Errorf("file metadata not found for assembled file: %s", filePath))
 				continue
 			}
@@ -374,8 +362,8 @@ func (inst *Installer) VerifyFiles() {
 				fileExpectedChunkInstances[filePath] = len(instances)
 			}
 
-			// Create a unique key for this chunk instance (chunkID:offset)
-			instanceKey := chunkInstanceKey(cm.ChunkID, offset)
+			// Create a unique key for this exact assembled chunk instance (chunkID:offset)
+			instanceKey := chunkInstanceKey(cm.ChunkID, assemblerOutput.Offset)
 			fileAssembledChunks[filePath][instanceKey] = true
 
 			expectedChunkInstances := fileExpectedChunkInstances[filePath]

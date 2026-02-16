@@ -63,7 +63,7 @@ func (a *Assembler) Start() {
 			if err := os.MkdirAll(dir, 0o755); err != nil {
 				logging.GlobalLogger.Error(fmt.Sprintf("Failed to create directory %s: %v", dir, err))
 				utils.CloseQuietly(input.Content)
-				a.OutputQueue <- AssemblerOutput{FilePath: input.FilePath, ChunkID: input.ChunkID, Succeeded: false, Payload: input.Payload, Err: err, Op: "mkdir", Path: dir}
+				a.OutputQueue <- AssemblerOutput{FilePath: input.FilePath, ChunkID: input.ChunkID, Offset: input.Offset, Succeeded: false, Payload: input.Payload, Err: err, Op: "mkdir", Path: dir}
 				continue
 			}
 
@@ -71,7 +71,7 @@ func (a *Assembler) Start() {
 			if err != nil {
 				logging.GlobalLogger.Error(fmt.Sprintf("Failed to open file %s: %v", fullPath, err))
 				utils.CloseQuietly(input.Content)
-				a.OutputQueue <- AssemblerOutput{FilePath: input.FilePath, ChunkID: input.ChunkID, Succeeded: false, Payload: input.Payload, Err: err, Op: "open", Path: fullPath}
+				a.OutputQueue <- AssemblerOutput{FilePath: input.FilePath, ChunkID: input.ChunkID, Offset: input.Offset, Succeeded: false, Payload: input.Payload, Err: err, Op: "open", Path: fullPath}
 				continue
 			}
 
@@ -79,7 +79,7 @@ func (a *Assembler) Start() {
 				logging.GlobalLogger.Error(fmt.Sprintf("Failed to seek to offset %d: %v", input.Offset, err))
 				utils.CloseQuietly(file)
 				utils.CloseQuietly(input.Content)
-				a.OutputQueue <- AssemblerOutput{FilePath: input.FilePath, ChunkID: input.ChunkID, Succeeded: false, Payload: input.Payload, Err: err, Op: "seek", Path: fullPath}
+				a.OutputQueue <- AssemblerOutput{FilePath: input.FilePath, ChunkID: input.ChunkID, Offset: input.Offset, Succeeded: false, Payload: input.Payload, Err: err, Op: "seek", Path: fullPath}
 				continue
 			}
 
@@ -89,12 +89,12 @@ func (a *Assembler) Start() {
 
 			if err != nil {
 				logging.GlobalLogger.Error(fmt.Sprintf("Failed to write chunk %s: %v", input.ChunkID, err))
-				a.OutputQueue <- AssemblerOutput{FilePath: input.FilePath, ChunkID: input.ChunkID, Succeeded: false, Payload: input.Payload, Err: err, Op: "write", Path: fullPath}
+				a.OutputQueue <- AssemblerOutput{FilePath: input.FilePath, ChunkID: input.ChunkID, Offset: input.Offset, Succeeded: false, Payload: input.Payload, Err: err, Op: "write", Path: fullPath}
 				continue
 			}
 
 			logging.GlobalLogger.Debug(fmt.Sprintf("Wrote chunk %s to %s at offset %d (%d bytes)", input.ChunkID, input.FilePath, input.Offset, written))
-			a.OutputQueue <- AssemblerOutput{FilePath: input.FilePath, ChunkID: input.ChunkID, Succeeded: true, Payload: input.Payload}
+			a.OutputQueue <- AssemblerOutput{FilePath: input.FilePath, ChunkID: input.ChunkID, Offset: input.Offset, Succeeded: true, Payload: input.Payload}
 		}
 	}()
 }

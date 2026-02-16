@@ -16,6 +16,7 @@ type AssemblerInput struct {
 type AssemblerOutput struct {
 	FilePath  string
 	ChunkID   string
+	Offset    uint64
 	Succeeded bool
 	Payload   any
 	Err       error
