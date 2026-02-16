@@ -193,7 +193,9 @@ func TestFullInstallation(t *testing.T) {
 	_ = inst.ParseManifest(mani, info.ChunkDownload)
 	_ = inst.Prepare()
 	inst.Start()
-	inst.Wait()
+	if err := inst.WaitWithError(); err != nil {
+		t.Fatalf("installation failed: %v", err)
+	}
 	inst.Stop()
 
 	if err := pprof.Lookup("heap").WriteTo(f_m, 0); err != nil {
