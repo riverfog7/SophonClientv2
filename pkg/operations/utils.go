@@ -10,20 +10,22 @@ import (
 )
 
 func getGameBranch(gameType string, relType string, branch string) (models.HYPGameBranch, error) {
+	gameType = strings.ToLower(gameType)
+	relType = strings.ToLower(relType)
+
 	var biz string
-	var hypGames []models.HYPGame
-	switch strings.ToLower(relType) {
+	switch relType {
 	case "cn":
-		biz = strings.ToLower(gameType) + "_cn"
-		hypGames = hypAPI.CNGameBranches.Data.GameBranches
-	case "os":
-		biz = strings.ToLower(gameType) + "_global"
-		hypGames = hypAPI.OSGameBranches.Data.GameBranches
+		biz = gameType + "_cn"
 	default:
-		logging.GlobalLogger.Warn("Unknown release type in function GetAndParseManifest, defaulting to OS")
-		biz = strings.ToLower(gameType) + "_global"
-		hypGames = hypAPI.OSGameBranches.Data.GameBranches
+		biz = gameType + "_global"
 	}
+
+	branchesResp, err := hypAPI.GetGameBranches(relType)
+	if err != nil {
+		return models.HYPGameBranch{}, fmt.Errorf("get game branches for %s: %w", relType, err)
+	}
+	hypGames := branchesResp.Data.GameBranches
 
 	var selectedGame *models.HYPGame
 	for i := range hypGames {

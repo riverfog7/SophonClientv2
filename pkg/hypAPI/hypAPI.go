@@ -8,19 +8,43 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 )
 
-func GetGameBranches(relType string) (models.HYPGetGameBranchesResponse, error) {
-	var url string
+var (
+	cacheMu       sync.RWMutex
+	branchesCache = make(map[string]models.HYPGetGameBranchesResponse)
+	configsCache  = make(map[string]models.HYPGetGameConfigsResponse)
+)
+
+func normalizeRelType(relType string) string {
 	switch strings.ToLower(relType) {
 	case "cn":
-		url = secrets.GetGameBranchCNUrl
+		return "cn"
 	case "os":
-		url = secrets.GetGameBranchOSUrl
+		return "os"
 	default:
-		logging.GlobalLogger.Warn("Unknown release type in function GetGameBranches, defaulting to OS")
-		url = secrets.GetGameBranchOSUrl
+		logging.GlobalLogger.Warn("Unknown release type, defaulting to OS")
+		return "os"
 	}
+}
+
+func gameBranchesURL(relType string) string {
+	if relType == "cn" {
+		return secrets.GetGameBranchCNUrl
+	}
+	return secrets.GetGameBranchOSUrl
+}
+
+func gameConfigsURL(relType string) string {
+	if relType == "cn" {
+		return secrets.GetGameConfigsCNUrl
+	}
+	return secrets.GetGameConfigsOSUrl
+}
+
+func fetchGameBranches(relType string) (models.HYPGetGameBranchesResponse, error) {
+	url := gameBranchesURL(relType)
 
 	resp, err := http.Get(url)
 	if err != nil {
@@ -50,17 +74,30 @@ func GetGameBranches(relType string) (models.HYPGetGameBranchesResponse, error) 
 	return branches, nil
 }
 
-func GetGameConfigs(relType string) (models.HYPGetGameConfigsResponse, error) {
-	var url string
-	switch strings.ToLower(relType) {
-	case "cn":
-		url = secrets.GetGameConfigsCNUrl
-	case "os":
-		url = secrets.GetGameConfigsOSUrl
-	default:
-		logging.GlobalLogger.Warn("Unknown release type in function GetGameConfigs, defaulting to OS")
-		url = secrets.GetGameConfigsOSUrl
+func GetGameBranches(relType string) (models.HYPGetGameBranchesResponse, error) {
+	relType = normalizeRelType(relType)
+
+	cacheMu.RLock()
+	if branches, ok := branchesCache[relType]; ok {
+		cacheMu.RUnlock()
+		return branches, nil
 	}
+	cacheMu.RUnlock()
+
+	branches, err := fetchGameBranches(relType)
+	if err != nil {
+		return models.HYPGetGameBranchesResponse{}, err
+	}
+
+	cacheMu.Lock()
+	branchesCache[relType] = branches
+	cacheMu.Unlock()
+
+	return branches, nil
+}
+
+func fetchGameConfigs(relType string) (models.HYPGetGameConfigsResponse, error) {
+	url := gameConfigsURL(relType)
 
 	resp, err := http.Get(url)
 	if err != nil {
@@ -90,7 +127,24 @@ func GetGameConfigs(relType string) (models.HYPGetGameConfigsResponse, error) {
 	return configs, nil
 }
 
-var OSGameBranches, _ = GetGameBranches("os")
-var CNGameBranches, _ = GetGameBranches("cn")
-var OSGameConfigs, _ = GetGameConfigs("os")
-var CNGameConfigs, _ = GetGameConfigs("cn")
+func GetGameConfigs(relType string) (models.HYPGetGameConfigsResponse, error) {
+	relType = normalizeRelType(relType)
+
+	cacheMu.RLock()
+	if configs, ok := configsCache[relType]; ok {
+		cacheMu.RUnlock()
+		return configs, nil
+	}
+	cacheMu.RUnlock()
+
+	configs, err := fetchGameConfigs(relType)
+	if err != nil {
+		return models.HYPGetGameConfigsResponse{}, err
+	}
+
+	cacheMu.Lock()
+	configsCache[relType] = configs
+	cacheMu.Unlock()
+
+	return configs, nil
+}

@@ -16,15 +16,37 @@ func StructPrettyPrint(data interface{}) {
 }
 
 func TestHypAPIConfigs(t *testing.T) {
-	StructPrettyPrint(hypAPI.CNGameConfigs)
-	StructPrettyPrint(hypAPI.OSGameConfigs)
-	StructPrettyPrint(hypAPI.CNGameBranches)
-	StructPrettyPrint(hypAPI.OSGameBranches)
+	cnConfigs, err := hypAPI.GetGameConfigs("cn")
+	if err != nil {
+		t.Fatalf("failed to fetch CN game configs: %v", err)
+	}
+	osConfigs, err := hypAPI.GetGameConfigs("os")
+	if err != nil {
+		t.Fatalf("failed to fetch OS game configs: %v", err)
+	}
+	cnBranches, err := hypAPI.GetGameBranches("cn")
+	if err != nil {
+		t.Fatalf("failed to fetch CN game branches: %v", err)
+	}
+	osBranches, err := hypAPI.GetGameBranches("os")
+	if err != nil {
+		t.Fatalf("failed to fetch OS game branches: %v", err)
+	}
+
+	StructPrettyPrint(cnConfigs)
+	StructPrettyPrint(osConfigs)
+	StructPrettyPrint(cnBranches)
+	StructPrettyPrint(osBranches)
 }
 
 func TestFetchCNGameBranches(t *testing.T) {
+	branches, err := hypAPI.GetGameBranches("cn")
+	if err != nil {
+		t.Fatalf("failed to fetch CN game branches: %v", err)
+	}
+
 	fmt.Println("Fetching CN Game Branches...")
-	for _, gameBranch := range hypAPI.CNGameBranches.Data.GameBranches {
+	for _, gameBranch := range branches.Data.GameBranches {
 		mainBranch := gameBranch.Main
 		url := hypAPI.BuildSophonGetBuildURL("cn", mainBranch)
 		fmt.Println(url)
@@ -40,8 +62,13 @@ func TestFetchCNGameBranches(t *testing.T) {
 }
 
 func TestFetchOSGameBranches(t *testing.T) {
+	branches, err := hypAPI.GetGameBranches("os")
+	if err != nil {
+		t.Fatalf("failed to fetch OS game branches: %v", err)
+	}
+
 	fmt.Println("Fetching OS Game Branches...")
-	for _, gameBranch := range hypAPI.OSGameBranches.Data.GameBranches {
+	for _, gameBranch := range branches.Data.GameBranches {
 		mainBranch := gameBranch.Main
 		url := hypAPI.BuildSophonGetBuildURL("os", mainBranch)
 		fmt.Println(url)
@@ -57,8 +84,13 @@ func TestFetchOSGameBranches(t *testing.T) {
 }
 
 func TestFetchCNGamePatchBuilds(t *testing.T) {
+	branches, err := hypAPI.GetGameBranches("cn")
+	if err != nil {
+		t.Fatalf("failed to fetch CN game branches: %v", err)
+	}
+
 	fmt.Println("Fetching CN Game Patch Builds...")
-	for _, gameBranch := range hypAPI.CNGameBranches.Data.GameBranches {
+	for _, gameBranch := range branches.Data.GameBranches {
 		mainBranch := gameBranch.Main
 		url := hypAPI.PatchSophonGetBuildURL("cn", mainBranch)
 		fmt.Println(url)
@@ -74,8 +106,13 @@ func TestFetchCNGamePatchBuilds(t *testing.T) {
 }
 
 func TestFetchOSGamePatchBuilds(t *testing.T) {
+	branches, err := hypAPI.GetGameBranches("os")
+	if err != nil {
+		t.Fatalf("failed to fetch OS game branches: %v", err)
+	}
+
 	fmt.Println("Fetching OS Game Patch Builds...")
-	for _, gameBranch := range hypAPI.OSGameBranches.Data.GameBranches {
+	for _, gameBranch := range branches.Data.GameBranches {
 		mainBranch := gameBranch.Main
 		url := hypAPI.PatchSophonGetBuildURL("os", mainBranch)
 		fmt.Println(url)
