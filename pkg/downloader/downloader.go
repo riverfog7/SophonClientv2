@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"math/rand"
 	"net"
@@ -142,6 +143,10 @@ func (worker *DownloaderWorker) emitOutput(out DownloaderOutput) bool {
 	}
 }
 
+func (worker *DownloaderWorker) emitFailure(payload any, err error, retryable bool) bool {
+	return worker.emitOutput(DownloaderOutput{Content: nil, Suceeded: false, Err: err, Retryable: retryable, Payload: payload})
+}
+
 func (worker *DownloaderWorker) Start() {
 	logging.GlobalLogger.Debug("Started downloader worker " + strconv.Itoa(worker.Id))
 
@@ -170,7 +175,7 @@ func (worker *DownloaderWorker) Start() {
 					req, reqErr := http.NewRequestWithContext(worker.Ctx, http.MethodGet, input.Url, nil)
 					if reqErr != nil {
 						logging.GlobalLogger.Error("Worker " + strconv.Itoa(worker.Id) + ": Failed to build request for " + input.Url + ": " + reqErr.Error())
-						if !worker.emitOutput(DownloaderOutput{Content: nil, Suceeded: false, Payload: input.Payload}) {
+						if !worker.emitFailure(input.Payload, fmt.Errorf("build request: %w", reqErr), false) {
 							return
 						}
 						break
@@ -194,7 +199,7 @@ func (worker *DownloaderWorker) Start() {
 						}
 
 						logging.GlobalLogger.Error("Worker " + strconv.Itoa(worker.Id) + ": Failed to download chunk from " + input.Url + " (transport): " + err.Error())
-						if !worker.emitOutput(DownloaderOutput{Content: nil, Suceeded: false, Payload: input.Payload}) {
+						if !worker.emitFailure(input.Payload, fmt.Errorf("transport: %w", err), retryable) {
 							return
 						}
 						break
@@ -216,7 +221,7 @@ func (worker *DownloaderWorker) Start() {
 						}
 
 						logging.GlobalLogger.Error("Worker " + strconv.Itoa(worker.Id) + ": Failed to download chunk from " + input.Url + " (http_" + strconv.Itoa(statusCode) + ")")
-						if !worker.emitOutput(DownloaderOutput{Content: nil, Suceeded: false, Payload: input.Payload}) {
+						if !worker.emitFailure(input.Payload, fmt.Errorf("unexpected http status: %d", statusCode), retryable) {
 							return
 						}
 						break
@@ -241,7 +246,7 @@ func (worker *DownloaderWorker) Start() {
 						}
 
 						logging.GlobalLogger.Error("Worker " + strconv.Itoa(worker.Id) + ": Error reading response body from " + input.Url + " (read_body): " + readErr.Error())
-						if !worker.emitOutput(DownloaderOutput{Content: nil, Suceeded: false, Payload: input.Payload}) {
+						if !worker.emitFailure(input.Payload, fmt.Errorf("read body: %w", readErr), retryable) {
 							return
 						}
 						break
@@ -259,9 +264,14 @@ func (worker *DownloaderWorker) Start() {
 }
 
 func NewDownloader(buffSize int) *Downloader {
-	logging.GlobalLogger.Info("Initializing Downloader with " + strconv.Itoa(config.Config.CocurrentDownloads) + " concurrent downloads")
-
 	threadCount := config.Config.CocurrentDownloads
+	if threadCount < 1 {
+		logging.GlobalLogger.Warn("Configured concurrent downloads is invalid, defaulting to 1")
+		threadCount = 1
+	}
+
+	logging.GlobalLogger.Info("Initializing Downloader with " + strconv.Itoa(threadCount) + " concurrent downloads")
+
 	inputQueue := make(chan DownloaderInput, buffSize)
 	outputQueue := make(chan DownloaderOutput, buffSize)
 	workers := make([]*DownloaderWorker, threadCount)
@@ -304,6 +314,11 @@ func NewDownloader(buffSize int) *Downloader {
 }
 
 func (d *Downloader) StartPrintChannelStatus(intervalSeconds int) {
+	if intervalSeconds <= 0 {
+		logging.GlobalLogger.Debug("Downloader queue status ticker disabled due to non-positive interval")
+		return
+	}
+
 	go func() {
 		ticker := time.NewTicker(time.Duration(intervalSeconds) * time.Second)
 		defer ticker.Stop()

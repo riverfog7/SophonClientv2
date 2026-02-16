@@ -13,9 +13,11 @@ type DownloaderInput struct {
 }
 
 type DownloaderOutput struct {
-	Content  io.ReadCloser
-	Suceeded bool
-	Payload  any
+	Content   io.ReadCloser
+	Suceeded  bool
+	Err       error
+	Retryable bool
+	Payload   any
 }
 
 type DownloaderWorker struct {

@@ -514,6 +514,30 @@ func (inst *Installer) tryRequeueChunk(cm *ChunkMetaData, stage string) bool {
 	return true
 }
 
+func (inst *Installer) handleDownloadFailure(cm *ChunkMetaData, err error, retryable bool) {
+	if cm == nil {
+		inst.setTerminalError(fmt.Errorf("nil chunk metadata at download"))
+		return
+	}
+
+	if retryable {
+		if err != nil {
+			logging.GlobalLogger.Warn(fmt.Sprintf("Download failed for chunk %s (%v), re-enqueueing", cm.ChunkID, err))
+		} else {
+			logging.GlobalLogger.Warn(fmt.Sprintf("Download failed for chunk %s, re-enqueueing", cm.ChunkID))
+		}
+		inst.tryRequeueChunk(cm, "download")
+		return
+	}
+
+	if err != nil {
+		inst.setTerminalError(fmt.Errorf("download failed permanently for chunk %s: %w", cm.ChunkID, err))
+		return
+	}
+
+	inst.setTerminalError(fmt.Errorf("download failed permanently for chunk %s", cm.ChunkID))
+}
+
 func (inst *Installer) tryRequeueFile(filePath, stage string) bool {
 	if filePath == "" {
 		inst.setTerminalError(fmt.Errorf("empty file path for requeue at %s", stage))

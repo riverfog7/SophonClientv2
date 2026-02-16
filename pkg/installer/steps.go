@@ -169,9 +169,8 @@ func (inst *Installer) DecompressChunks() {
 			}
 
 			if !downloadOutput.Suceeded {
-				logging.GlobalLogger.Warn(fmt.Sprintf("Download failed for chunk %s, re-enqueueing", cm.ChunkID))
 				utils.CloseQuietly(downloadOutput.Content)
-				inst.tryRequeueChunk(cm, "download")
+				inst.handleDownloadFailure(cm, downloadOutput.Err, downloadOutput.Retryable)
 				continue
 			}
 
